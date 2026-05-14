@@ -1,4 +1,14 @@
+from __future__ import annotations
+
 from datetime import date as date_type
+from html import escape
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
 
 import streamlit as st
 
@@ -9,156 +19,443 @@ except ImportError:
     from agent import AgentState, build_graph
     from models import Itinerary, TravelRequest
 
+
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
 
-st.set_page_config(page_title="Travel Planning Agent", layout="centered", page_icon="✈️")
-st.title("✈️ Travel Planning Agent")
 
-# ── sidebar: demo guide ───────────────────────────────────────────────────────
-st.markdown(
-    """
-    <style>
-    [data-testid="stSidebar"],
-    [data-testid="collapsedControl"] {
-        display: none;
-    }
-    section.main > div {
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+st.set_page_config(
+    page_title="SkySwift AI",
+    layout="centered",
+    page_icon="SS",
+    initial_sidebar_state="collapsed",
 )
 
-with st.sidebar:
-    st.header("Demo Scenarios")
+
+def _empty_state() -> AgentState:
+    return {
+        "messages": [],
+        "travel_request": {},
+        "confirmed_request": None,
+        "itineraries": [],
+        "selected_itinerary": None,
+        "booking": None,
+        "reasoning_log": [],
+        "backtrack_count": 0,
+        "phase": "onboard",
+        "passenger_info": {},
+        "contact_info": {},
+        "payment_info": {},
+    }
+
+
+def _inject_theme() -> None:
     st.markdown(
-        "**Tokyo (happy path)**\n"
-        "- Budget: $2,000+\n"
-        "- Style: adventure, culture\n\n"
-        "**Paris (backtracking demo)**\n"
-        "- Budget: $1,500 ← triggers backtrack!\n"
-        "- Style: romance\n"
-        "- All Paris hotels > $1,500/night\n"
-        "- Watch the Reasoning panel fill up\n\n"
-        "**Bali / New York** — standard paths"
-    )
-    st.divider()
-    st.caption(
-        "**Live data:** set `AMADEUS_CLIENT_ID` + `AMADEUS_CLIENT_SECRET`\n\n"
-        "App runs standalone with embedded data when no credentials are set."
+        """
+        <style>
+        :root {
+            --sky-ink: #172033;
+            --sky-muted: #697386;
+            --sky-line: #e4e9ef;
+            --sky-soft: #f6f9fb;
+            --sky-teal: #0ea5a4;
+            --sky-teal-dark: #087d7d;
+            --sky-user: #e9f7f6;
+        }
+
+        html, body, [data-testid="stAppViewContainer"] {
+            background: #fbfcfd;
+            color: var(--sky-ink);
+            font-family: Inter, Segoe UI, system-ui, -apple-system, sans-serif;
+        }
+
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        [data-testid="stSidebar"],
+        [data-testid="collapsedControl"] {
+            display: none;
+        }
+
+        .block-container {
+            max-width: 880px;
+            padding: 22px 18px 120px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            background: #172033;
+            color: #ffffff;
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .brand-name {
+            font-size: 1rem;
+            font-weight: 800;
+            color: var(--sky-ink);
+            letter-spacing: 0;
+        }
+
+        .reset-wrap .stButton > button {
+            min-height: 34px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1px solid var(--sky-line);
+            background: #ffffff;
+            color: var(--sky-muted);
+            box-shadow: none;
+            font-weight: 650;
+        }
+
+        .landing {
+            min-height: calc(100vh - 260px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 42px 0 24px;
+        }
+
+        .landing-title {
+            margin: 0;
+            font-size: clamp(2.4rem, 7vw, 4.8rem);
+            line-height: 1;
+            letter-spacing: 0;
+            font-weight: 850;
+            color: var(--sky-ink);
+        }
+
+        .landing-line {
+            margin: 18px 0 0;
+            color: var(--sky-muted);
+            font-size: clamp(1.05rem, 2.2vw, 1.35rem);
+        }
+
+        .chat-space {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        div[data-testid="stChatMessage"] {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            padding: 0.25rem 0;
+        }
+
+        div[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+            line-height: 1.65;
+        }
+
+        div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+            background: var(--sky-user);
+            border: 1px solid #d5efed;
+            border-radius: 8px;
+            padding: 0.35rem 0.55rem;
+        }
+
+        [data-testid="stChatInput"] {
+            max-width: 840px;
+            margin: 0 auto;
+        }
+
+        [data-testid="stChatInput"] textarea {
+            min-height: 58px;
+            border-radius: 8px;
+            border: 1px solid var(--sky-line);
+            background: #ffffff;
+            box-shadow: 0 12px 30px rgba(23, 32, 51, 0.08);
+        }
+
+        [data-testid="stChatInput"] button {
+            border-radius: 8px;
+            background: var(--sky-teal);
+            color: #ffffff;
+        }
+
+        .trip-card {
+            border: 1px solid var(--sky-line);
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 16px;
+            margin: 10px 0;
+        }
+
+        .trip-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .trip-title {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: var(--sky-ink);
+        }
+
+        .score {
+            border-radius: 999px;
+            padding: 5px 9px;
+            color: var(--sky-teal-dark);
+            background: #e8f7f6;
+            font-size: 0.82rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .trip-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .fact {
+            background: var(--sky-soft);
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .label {
+            color: var(--sky-muted);
+            font-size: 0.76rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .value {
+            color: var(--sky-ink);
+            font-weight: 650;
+            overflow-wrap: anywhere;
+        }
+
+        .warning {
+            display: inline-block;
+            margin-top: 8px;
+            border-radius: 999px;
+            background: #fff4e5;
+            color: #8a5b0c;
+            padding: 5px 9px;
+            font-size: 0.8rem;
+            font-weight: 750;
+        }
+
+        .stButton > button {
+            border-radius: 8px;
+            border: 1px solid var(--sky-teal);
+            background: var(--sky-teal);
+            color: #ffffff;
+            font-weight: 750;
+        }
+
+        .stButton > button:hover {
+            border-color: var(--sky-teal-dark);
+            background: var(--sky-teal-dark);
+            color: #ffffff;
+        }
+
+        @media (max-width: 700px) {
+            .block-container {
+                padding: 18px 14px 110px;
+            }
+            .trip-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-# ── Session state init ────────────────────────────────────────────────────────
+
+def _render_topbar(show_reset: bool) -> None:
+    left, right = st.columns([5, 1])
+    with left:
+        st.markdown(
+            """
+            <div class="topbar">
+              <div class="brand">
+                <div class="brand-mark">SS</div>
+                <div class="brand-name">SkySwift AI</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with right:
+        if show_reset:
+            st.markdown('<div class="reset-wrap">', unsafe_allow_html=True)
+            if st.button("Start over", use_container_width=True):
+                _reset_trip()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_landing() -> None:
+    st.markdown(
+        """
+        <div class="landing">
+          <h1 class="landing-title">SkySwift AI</h1>
+          <p class="landing-line">Where are we flying today?</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_trip_card(index: int, itin: Itinerary) -> None:
+    activities = ", ".join(escape(activity.name) for activity in itin.activities) or "None selected"
+    warning = '<span class="warning">Exceeds budget</span>' if itin.is_partial_fallback else ""
+    st.markdown(
+        f"""
+        <div class="trip-card">
+          <div class="trip-top">
+            <div>
+              <h3 class="trip-title">Option {index + 1}: {escape(itin.flight.destination)}</h3>
+              {warning}
+            </div>
+            <div class="score">Match {itin.match_score:.2f}</div>
+          </div>
+          <div class="trip-grid">
+            <div class="fact">
+              <div class="label">Flight</div>
+              <div class="value">{escape(itin.flight.airline)} | ${itin.flight.price:.0f} | {itin.flight.duration_hours:g}h</div>
+            </div>
+            <div class="fact">
+              <div class="label">Hotel</div>
+              <div class="value">{escape(itin.hotel.name)} | ${itin.hotel.price_per_night:.0f}/night</div>
+            </div>
+            <div class="fact">
+              <div class="label">Activities</div>
+              <div class="value">{activities}</div>
+            </div>
+            <div class="fact">
+              <div class="label">Total</div>
+              <div class="value">${itin.total_cost:.0f}</div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_order_summary(itin: Itinerary) -> None:
+    activities = ", ".join(escape(activity.name) for activity in itin.activities) or "None selected"
+    warning = '<span class="warning">This package exceeds your stated budget</span>' if itin.is_partial_fallback else ""
+    st.markdown(
+        f"""
+        <div class="trip-card">
+          <div class="trip-top">
+            <div>
+              <h3 class="trip-title">Order summary</h3>
+              {warning}
+            </div>
+            <div class="score">Match {itin.match_score:.2f}</div>
+          </div>
+          <div class="trip-grid">
+            <div class="fact"><div class="label">Destination</div><div class="value">{escape(itin.flight.destination)}</div></div>
+            <div class="fact"><div class="label">Flight</div><div class="value">{escape(itin.flight.airline)} | ${itin.flight.price:.0f}</div></div>
+            <div class="fact"><div class="label">Hotel</div><div class="value">{escape(itin.hotel.name)} | ${itin.hotel.price_per_night:.0f}/night</div></div>
+            <div class="fact"><div class="label">Total</div><div class="value">${itin.total_cost:.0f}</div></div>
+          </div>
+          <p style="color:#697386;margin:12px 0 0;">Activities: {activities}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _reset_trip() -> None:
+    st.session_state.graph = build_graph()
+    st.session_state.state = _empty_state()
+    st.rerun()
+
+
+def _has_user_message(state: AgentState) -> bool:
+    return any(message.get("role") == "user" for message in state.get("messages", []))
+
+
+_inject_theme()
+
 if "graph" not in st.session_state:
     st.session_state.graph = build_graph()
-    st.session_state.state: AgentState = {
-        "messages":           [],
-        "travel_request":     {},
-        "confirmed_request":  None,
-        "itineraries":        [],
-        "selected_itinerary": None,
-        "booking":            None,
-        "reasoning_log":      [],
-        "backtrack_count":    0,
-        "phase":              "onboard",
-    }
+if "state" not in st.session_state:
+    st.session_state.state = _empty_state()
 
 state: AgentState = st.session_state.state
 graph = st.session_state.graph
 
-# First-load: let the graph ask the opening question
 if not state["messages"]:
     new_state = graph.invoke(state)
     st.session_state.state = new_state
     st.rerun()
 
+conversation_started = _has_user_message(state)
+_render_topbar(show_reset=conversation_started or state["phase"] != "onboard")
 
-# ── Chat history ──────────────────────────────────────────────────────────────
-for msg in state["messages"]:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+if not conversation_started and state["phase"] == "onboard":
+    _render_landing()
+else:
+    st.markdown('<div class="chat-space">', unsafe_allow_html=True)
+    for msg in state["messages"]:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+    st.markdown("</div>", unsafe_allow_html=True)
 
-
-# ── reasoning panel ───────────────────────────────────────────────────────────
-with st.expander("Agent Reasoning", expanded=False):
-    if state["reasoning_log"]:
-        for entry in state["reasoning_log"]:
-            if "backtrack" in entry.lower() or "fallback" in entry.lower():
-                st.warning(f"⚠ {entry}")
-            elif entry.startswith("GET "):
-                st.code(entry, language=None)
-            else:
-                st.write(f"• {entry}")
-    else:
-        st.caption("No reasoning steps yet.")
-
-
-# ── Itinerary cards (rank phase) ──────────────────────────────────────────────
 if state["phase"] == "rank":
     if not state["itineraries"]:
         st.error("Unable to find a matching itinerary. Please restart with a higher budget.")
     else:
-        st.divider()
-        st.subheader("Your Itinerary Options")
         for i, itin in enumerate(state["itineraries"]):
-            with st.container(border=True):
-                fallback = "  ⚠️ Exceeds Budget" if itin.is_partial_fallback else ""
-                st.subheader(f"Option {i + 1}  —  Score: {itin.match_score:.2f}{fallback}")
-                st.write(f"**Flight:** {itin.flight.airline} ({itin.flight.id})  —  ${itin.flight.price:.2f}  ({itin.flight.duration_hours}h)")
-                st.write(f"**Hotel:** {itin.hotel.name}  —  ${itin.hotel.price_per_night:.2f}/night  ({itin.hotel.stars}★)")
-                st.write(f"**Activities:** {', '.join(a.name for a in itin.activities) or 'None'}")
-                st.write(f"**Total Cost:** ${itin.total_cost:.2f}")
+            _render_trip_card(i, itin)
+            if st.button(f"Select option {i + 1}", key=f"select_{i}", use_container_width=True):
+                state["selected_itinerary"] = itin
+                state["phase"] = "confirm"
+                new_state = graph.invoke(state)
+                st.session_state.state = new_state
+                st.rerun()
 
-                if st.button(f"Select Option {i + 1}", key=f"select_{i}"):
-                    state["selected_itinerary"] = itin
-                    state["phase"] = "confirm"
-                    # Invoke graph so confirm_node generates the booking
-                    new_state = graph.invoke(state)
-                    st.session_state.state = new_state
-                    st.rerun()
-
-
-# ── Confirm panel (after itinerary selection) ─────────────────────────────────
 if state["phase"] == "confirm" and state["selected_itinerary"]:
-    itin: Itinerary = state["selected_itinerary"]
-    st.divider()
-    st.subheader("Order Summary")
-    with st.container(border=True):
-        if itin.is_partial_fallback:
-            st.warning("This package exceeds your stated budget.")
-        st.write(f"**Destination:** {itin.flight.destination}")
-        st.write(f"**Flight:** {itin.flight.airline} ({itin.flight.id})  —  ${itin.flight.price:.2f}")
-        st.write(f"**Hotel:** {itin.hotel.name}  —  ${itin.hotel.price_per_night:.2f}/night")
-        st.write(f"**Activities:** {', '.join(a.name for a in itin.activities) or 'None'}")
-        st.write(f"**Total Cost:** ${itin.total_cost:.2f}")
-        st.write(f"**Match Score:** {itin.match_score:.2f}")
-
-    if st.button("Confirm & Book"):
+    selected: Itinerary = state["selected_itinerary"]
+    _render_order_summary(selected)
+    if st.button("Confirm and book", type="primary", use_container_width=True):
         new_state = graph.invoke(state)
         st.session_state.state = new_state
         st.rerun()
 
-
-# ── Done: booking confirmation ────────────────────────────────────────────────
 if state["phase"] == "done" and state["booking"]:
-    st.divider()
-    st.success(f"Booking Confirmed — ID: `{state['booking'].booking_id}`")
-    if st.button("Plan Another Trip", type="primary"):
-        st.session_state.state = {
-            "messages": [], "travel_request": {}, "confirmed_request": None,
-            "itineraries": [], "selected_itinerary": None, "booking": None,
-            "reasoning_log": [], "backtrack_count": 0, "phase": "onboard",
-            "passenger_info": {}, "contact_info": {}, "payment_info": {},
-        }
-        st.rerun()
+    st.success(f"Booking confirmed. Confirmation ID: {state['booking'].booking_id}")
+    if st.button("Plan another trip", type="primary", use_container_width=True):
+        _reset_trip()
 
-
-# ── stub-mode helpers ─────────────────────────────────────────────────────────
 
 def _run_planning(state: AgentState) -> None:
-    """Call the real planner directly (used when build_graph() is still a stub)."""
+    """Call the real planner directly, used only if the graph is swapped for a stub."""
     try:
         from travel_agent.data.client import LiveDataClient as DataClient
         from travel_agent.planner import run_planning_loop
@@ -208,7 +505,7 @@ def _process_stub(state: AgentState, prompt: str) -> None:
     reply: str
 
     if "destination" not in tr:
-        valid = ["Tokyo", "Paris", "Bali", "New York"]
+        valid = ["Tokyo", "Paris", "Bali", "New York", "Japan", "Greece", "Thailand", "Mexico", "Israel"]
         dest = next((v for v in valid if v.lower() == prompt.strip().lower()), None)
         if dest:
             tr["destination"] = dest
@@ -244,7 +541,7 @@ def _process_stub(state: AgentState, prompt: str) -> None:
             else:
                 tr["budget"] = budget
                 reply = (
-                    f"What travel styles do you prefer? "
+                    "What travel styles do you prefer? "
                     f"(comma-separated from: {', '.join(_VALID_STYLES)})"
                 )
         except ValueError:
@@ -257,34 +554,33 @@ def _process_stub(state: AgentState, prompt: str) -> None:
         else:
             tr["travel_style"] = styles
             reply = (
-                f"Here's your trip summary:\n"
+                "Here is your trip summary:\n"
                 f"- Destination: {tr['destination']}\n"
-                f"- Dates: {tr['departure_date']} → {tr['return_date']}\n"
+                f"- Dates: {tr['departure_date']} -> {tr['return_date']}\n"
                 f"- Budget: ${tr['budget']:.0f}\n"
                 f"- Style: {', '.join(styles)}\n\n"
-                f"Shall I proceed with planning? (yes / no)"
+                "Shall I proceed with planning? (yes / no)"
             )
 
     elif prompt.strip().lower() in ("yes", "y"):
         state["travel_request"] = tr
-        state["messages"].append({"role": "assistant", "content": "On it! Planning your trip..."})
+        state["messages"].append({"role": "assistant", "content": "On it. Planning your trip..."})
         _run_planning(state)
         return
 
     elif prompt.strip().lower() in ("no", "n"):
         state["travel_request"] = {}
-        reply = "No problem! Where would you like to travel? (Tokyo, Paris, Bali, New York)"
+        reply = "No problem. Where would you like to travel?"
 
     else:
-        reply = "Please reply with 'yes' to proceed or 'no' to start over."
+        reply = "Please reply with yes to proceed or no to start over."
 
     state["travel_request"] = tr
     state["messages"].append({"role": "assistant", "content": reply})
 
 
-# ── chat input ────────────────────────────────────────────────────────────────
 if state["phase"] != "done":
-    if prompt := st.chat_input("Type your response..."):
+    if prompt := st.chat_input("Message SkySwift AI..."):
         state["messages"].append({"role": "user", "content": prompt})
         try:
             new_state = graph.invoke(state)
@@ -292,7 +588,7 @@ if state["phase"] != "done":
         except ConnectionError:
             state["messages"].append({
                 "role": "assistant",
-                "content": "Cannot reach the travel data server. Run: `uvicorn mock_server:app --port 8000`",
+                "content": "Cannot reach the travel data server. Run: uvicorn mock_server:app --port 8000",
             })
             st.session_state.state = state
         except Exception as e:

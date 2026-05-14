@@ -8,13 +8,25 @@ try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
     from .data.client import LiveDataClient as DataClient
     from .data.static import STATIC_DATA
-    from .openrouter_client import build_trip_explanation, extract_travel_request_fields
+    from .openrouter_client import (
+        build_trip_explanation,
+        extract_travel_request_fields,
+        extract_passenger_fields,
+        generate_conversational_prompt,
+        generate_travel_followup,
+    )
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
     from data.client import LiveDataClient as DataClient
     from data.static import STATIC_DATA
-    from openrouter_client import build_trip_explanation, extract_travel_request_fields
+    from openrouter_client import (
+        build_trip_explanation,
+        extract_travel_request_fields,
+        extract_passenger_fields,
+        generate_conversational_prompt,
+        generate_travel_followup,
+    )
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
 from langgraph.graph import END, StateGraph
@@ -44,15 +56,27 @@ class AgentState(TypedDict):
 _FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
 
 _QUESTIONS = {
-    "destination":    "What is your destination? You can type a city or country, like Tokyo, Italy, Greece, Thailand, or Mexico.",
-    "departure_date": "What is your departure date? (YYYY-MM-DD)",
-    "return_date":    "What is your return date? (YYYY-MM-DD)",
-    "budget":         "What is your total budget in USD?",
-    "travel_style":   "What travel styles do you prefer? (e.g. adventure, culture, luxury)",
+    "destination":    "Great, let us start with the fun part. Where would you like to fly today? You can choose a city or country, like Tokyo, Greece, Thailand, Mexico, or Israel.",
+    "departure_date": "Nice choice. What date would you like to depart? Please use YYYY-MM-DD so I can plan accurately.",
+    "return_date":    "And when should you come back? Send the return date in YYYY-MM-DD format.",
+    "budget":         "Perfect. What total budget should I keep in mind for the trip, in USD?",
+    "travel_style":   "What travel style should this feel like: adventure, culture, luxury, romance, nature, food, or budget-friendly?",
 }
 
 _VALID_DESTINATIONS = sorted(STATIC_DATA.keys(), key=len, reverse=True)
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
+
+
+def _ask_for_field(field: str, tr: dict, messages: list[dict], last_user: str | None = None) -> str:
+    if last_user is None:
+        opening_questions = {
+            "destination": "Hi, I am SkySwift AI. Tell me your destination, and I will help shape the trip from there.",
+        }
+        return opening_questions.get(field, _QUESTIONS[field])
+    return (
+        generate_travel_followup(field, tr, messages, last_user)
+        or _QUESTIONS[field]
+    )
 
 
 def _local_extract_travel_fields(text: str) -> dict[str, Any]:
@@ -108,7 +132,12 @@ def _apply_extracted_fields(tr: dict, extracted: dict[str, Any]) -> None:
 
 def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
     """Store validated value in tr. Returns an error message string, or None on success."""
-    if field == "budget":
+    if field == "destination":
+        destination = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
+        if destination is None:
+            return "I can help with Tokyo, Paris, Bali, New York, Japan, France, Italy, Greece, Thailand, Spain, United Kingdom, Mexico, or Israel. Where would you like to go?"
+        tr["destination"] = destination
+    elif field == "budget":
         try:
             budget = float(value.replace("$", "").replace(",", ""))
             if budget <= 0:
@@ -131,6 +160,8 @@ def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
             tr["return_date"] = value
         except ValueError:
             return "Please enter a valid date (YYYY-MM-DD)."
+    elif field == "travel_style":
+        tr[field] = value
     else:
         tr[field] = value
     return None
@@ -205,7 +236,10 @@ def onboard_node(state: AgentState) -> AgentState:
         if next_field is not None and not handled_as_natural_message:
             error = _validate_and_store(next_field, last_user, tr)
             if error:
-                messages.append({"role": "assistant", "content": error})
+                if next_field == "destination":
+                    messages.append({"role": "assistant", "content": _ask_for_field("destination", tr, messages, last_user)})
+                else:
+                    messages.append({"role": "assistant", "content": error})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 return state
@@ -216,20 +250,20 @@ def onboard_node(state: AgentState) -> AgentState:
                 return _build_confirmed_request(state, messages, tr)
             elif last_user.lower() in ("no", "n"):
                 tr = {}
-                messages.append({"role": "assistant", "content": "No problem! Where would you like to travel? You can type a city or country."})
+                messages.append({"role": "assistant", "content": _ask_for_field("destination", {}, messages, last_user)})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"
                 return state
             else:
-                messages.append({"role": "assistant", "content": "Please type 'yes' to confirm or 'no' to start over."})
+                messages.append({"role": "assistant", "content": "I have the main trip details ready. Should I start planning this itinerary now? Reply yes to continue or no to start over."})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"
                 return state
 
     if next_field is not None:
-        messages.append({"role": "assistant", "content": _QUESTIONS[next_field]})
+        messages.append({"role": "assistant", "content": _ask_for_field(next_field, tr, messages, last_user)})
     else:
         if last_user is not None:
             messages.append({"role": "assistant", "content": _summary_text(tr)})
@@ -379,11 +413,19 @@ def _next_collect_field(
 
 def collect_passenger_node(state: AgentState) -> AgentState:
     """
-    Sequential collection of passenger, contact, and payment details.
-    One field per graph.invoke() call, with inline validation.
-    Advances to phase 'confirm' when all 9 fields are collected.
+    Dynamic collection of passenger, contact, and payment details.
+
+    When OpenRouter is enabled: calls extract_passenger_fields on the user's
+    last message — any fields mentioned naturally are extracted and stored in
+    one turn. Then calls generate_conversational_prompt to ask for whatever
+    is still missing in a single friendly sentence.
+
+    When OpenRouter is disabled (no API key): falls back to the original
+    sequential one-field-per-turn behaviour with rule-based prompts.
+
+    Advances to phase 'confirm' (→ critic node) when all 9 fields are filled.
     """
-    messages      = list(state.get("messages", []))
+    messages       = list(state.get("messages", []))
     passenger_info = dict(state.get("passenger_info", {}))
     contact_info   = dict(state.get("contact_info",   {}))
     payment_info   = dict(state.get("payment_info",   {}))
@@ -399,42 +441,122 @@ def collect_passenger_node(state: AgentState) -> AgentState:
     if messages and messages[-1].get("role") == "user":
         last_user = messages[-1]["content"].strip()
 
-    if last_user is not None:
-        pending = _next_collect_field(passenger_info, contact_info, payment_info)
-        if pending is not None:
-            field, key, _ = pending
-            error = _validate_collect_field(field, last_user)
-            if error:
-                messages.append({"role": "assistant", "content": error})
-                state.update({"messages": messages, "passenger_info": passenger_info,
-                               "contact_info": contact_info, "payment_info": payment_info})
-                return state
-            stores[key][field] = last_user
+    if last_user:
+        extracted = extract_passenger_fields(last_user)
 
-    next_field = _next_collect_field(passenger_info, contact_info, payment_info)
+        if extracted:
+            # LLM path: store every valid extracted field in one pass
+            stored: list[str] = []
+            for field, key, _ in _COLLECT_FIELDS:
+                if field not in extracted or field in stores[key]:
+                    continue
+                value = str(extracted[field]).strip()
+                if not _validate_collect_field(field, value):
+                    stores[key][field] = value
+                    stored.append(field)
+            if stored:
+                reasoning_log.append(f"LLM extracted passenger fields: {', '.join(stored)}")
+        else:
+            # Sequential fallback: raw answer goes to the next pending field
+            pending = _next_collect_field(passenger_info, contact_info, payment_info)
+            if pending is not None:
+                field, key, _ = pending
+                error = _validate_collect_field(field, last_user)
+                if error:
+                    messages.append({"role": "assistant", "content": error})
+                    state.update({
+                        "messages":       messages,
+                        "passenger_info": passenger_info,
+                        "contact_info":   contact_info,
+                        "payment_info":   payment_info,
+                    })
+                    return state
+                stores[key][field] = last_user
 
-    if next_field is not None:
-        _, _, prompt = next_field
-        messages.append({"role": "assistant", "content": prompt})
-    else:
-        # All collected — show summary and advance to confirm
+    next_pending = _next_collect_field(passenger_info, contact_info, payment_info)
+
+    if next_pending is None:
+        # All 9 fields collected — hand off to critic
         reasoning_log.append("All passenger and payment details collected.")
         state["phase"] = "confirm"
         messages.append({
             "role": "assistant",
             "content": (
                 "All details collected. Here's your booking summary:\n\n"
-                f"**Passenger:** {passenger_info.get('full_name')} | Passport: {passenger_info.get('passport_number')}\n"
+                f"**Passenger:** {passenger_info.get('full_name')} | "
+                f"Passport: {passenger_info.get('passport_number')}\n"
                 f"**DOB:** {passenger_info.get('date_of_birth')}\n"
                 f"**Contact:** {contact_info.get('email')} | {contact_info.get('phone')}\n"
                 f"**Address:** {contact_info.get('address')}\n"
-                f"**Payment:** **** {payment_info.get('card_last4')} (exp {payment_info.get('card_expiry')}) — {payment_info.get('cardholder_name')}\n\n"
+                f"**Payment:** **** {payment_info.get('card_last4')} "
+                f"(exp {payment_info.get('card_expiry')}) — "
+                f"{payment_info.get('cardholder_name')}\n\n"
                 "Click **Confirm & Book** to finalize."
             ),
         })
+    else:
+        # Ask for whatever is still missing
+        missing_names = [f for f, k, _ in _COLLECT_FIELDS if f not in stores[k]]
+        question = generate_conversational_prompt(missing_names, messages)
+        if question is None:
+            _, _, question = next_pending   # sequential fallback
+        messages.append({"role": "assistant", "content": question})
 
     state.update({
-        "messages":      messages,
+        "messages":       messages,
+        "passenger_info": passenger_info,
+        "contact_info":   contact_info,
+        "payment_info":   payment_info,
+        "reasoning_log":  reasoning_log,
+    })
+    return state
+
+
+# ── Critic validator ─────────────────────────────────────────────────────────
+
+def critic_validation_node(state: AgentState) -> AgentState:
+    """
+    Re-validates all 9 collected fields after collection is complete.
+    Any field that fails validation is removed and the phase is reset to
+    'collect' so the user is asked only for those failing fields again.
+    If everything checks out the phase stays 'confirm'.
+    """
+    messages       = list(state.get("messages", []))
+    passenger_info = dict(state.get("passenger_info", {}))
+    contact_info   = dict(state.get("contact_info",   {}))
+    payment_info   = dict(state.get("payment_info",   {}))
+    reasoning_log  = list(state.get("reasoning_log",  []))
+
+    stores = {
+        "passenger_info": passenger_info,
+        "contact_info":   contact_info,
+        "payment_info":   payment_info,
+    }
+
+    failures: list[tuple[str, str]] = []  # (field_name, error_message)
+    for field, key, _ in _COLLECT_FIELDS:
+        value = stores[key].get(field, "")
+        error = _validate_collect_field(field, str(value))
+        if error:
+            failures.append((field, error))
+            stores[key].pop(field, None)
+
+    if failures:
+        detail = "; ".join(f"{f}: {e}" for f, e in failures)
+        reasoning_log.append(f"Critic rejected fields: {detail}")
+        messages.append({
+            "role": "assistant",
+            "content": (
+                "Some details didn't pass validation and need to be re-entered:\n"
+                + "\n".join(f"- **{f}**: {e}" for f, e in failures)
+            ),
+        })
+        state["phase"] = "collect"
+    else:
+        reasoning_log.append("Critic validation passed — all passenger/payment fields valid.")
+
+    state.update({
+        "messages":       messages,
         "passenger_info": passenger_info,
         "contact_info":   contact_info,
         "payment_info":   payment_info,
@@ -543,6 +665,7 @@ def build_graph():
     g.add_node("plan",              plan_node)
     g.add_node("rank",              rank_node)
     g.add_node("collect_passenger", collect_passenger_node)
+    g.add_node("critic",            critic_validation_node)
     g.add_node("confirm",           confirm_node)
 
     g.set_entry_point("router")
@@ -570,8 +693,15 @@ def build_graph():
     )
 
     g.add_edge("plan", "rank")
-    g.add_edge("rank",              END)
-    g.add_edge("collect_passenger", END)
-    g.add_edge("confirm",           END)
+    g.add_edge("rank", END)
+
+    # After collection: run critic only when all 9 fields are done (phase=="confirm")
+    g.add_conditional_edges(
+        "collect_passenger",
+        lambda s: "critic" if s.get("phase") == "confirm" else END,
+        {"critic": "critic", END: END},
+    )
+    g.add_edge("critic",  END)
+    g.add_edge("confirm", END)
 
     return g.compile()
