@@ -7,6 +7,7 @@ from typing import Any, Optional, TypedDict
 try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
     from .data.client import LiveDataClient as DataClient
+    from .data.static import STATIC_DATA
     from .openrouter_client import (
         build_trip_explanation,
         extract_passenger_fields,
@@ -17,6 +18,7 @@ try:
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
     from data.client import LiveDataClient as DataClient
+    from data.static import STATIC_DATA
     from openrouter_client import (
         build_trip_explanation,
         extract_passenger_fields,
@@ -158,6 +160,27 @@ def _normalise_travel_style(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def _destination_teaser(destination: str) -> str:
+    """Short pre-planning teaser from the mock catalog for a chosen city."""
+    data = STATIC_DATA.get(destination)
+    if not data:
+        return ""
+
+    activities = data.get("activities", [])[:3]
+    hotels = data.get("hotels", [])[:1]
+
+    activity_names = [activity.name for activity in activities]
+    if not activity_names:
+        return ""
+
+    ideas = ", ".join(activity_names)
+    hotel_hint = f" A stay like {hotels[0].name} can also fit the vibe." if hotels else ""
+    return (
+        f"Before we lock the budget, a few ideas in {destination}: {ideas}."
+        f"{hotel_hint}"
+    )
+
+
 def _coerce_budget(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
@@ -188,14 +211,17 @@ def _build_confirmed_request_from_preferences(
         return None, "Missing trip details: " + ", ".join(missing)
 
     try:
-        resp = _llm.messages.create(
-            model=_MODEL,
-            max_tokens=160,
-            messages=[{"role": "user", "content": "\n".join(lines)}],
+        tr = _normalise_trip_dates(tr)
+        confirmed = TravelRequest(
+            destination=str(tr["destination"]),
+            departure_date=date.fromisoformat(str(tr["departure_date"]).strip()),
+            return_date=date.fromisoformat(str(tr["return_date"]).strip()),
+            budget=_coerce_budget(tr["budget"]),
+            travel_style=_normalise_travel_style(tr.get("travel_style")),
         )
-        return next((b.text for b in resp.content if b.type == "text"), "").strip()
-    except Exception:
-        return ""
+        return confirmed, None
+    except Exception as exc:
+        return None, f"Validation error: {exc}"
 
 
 # ── Onboarding (rule-based fallback) ──────────────────────────────────────────
@@ -539,6 +565,7 @@ def onboard_node(state: AgentState) -> AgentState:
     """
     messages = list(state.get("messages", []))
     travel_request = dict(state.get("travel_request", {}))
+    previous_destination = travel_request.get("destination")
 
     llm_response = generate_autonomous_response(messages, travel_request)
 
@@ -547,12 +574,24 @@ def onboard_node(state: AgentState) -> AgentState:
         extracted = {}
 
     travel_request = _merge_extracted_preferences(travel_request, extracted)
+    current_destination = travel_request.get("destination")
+    suggestion_marker = "_teaser_shown_for"
 
     agent_status = str(llm_response.get("agent_status", "COLLECTING")).strip().upper()
     if agent_status not in {"COLLECTING", "READY_TO_PROPOSE", "APPROVED"}:
         agent_status = "COLLECTING"
 
     response_to_user = str(llm_response.get("response_to_user", "")).strip()
+    if (
+        current_destination
+        and current_destination != previous_destination
+        and travel_request.get(suggestion_marker) != current_destination
+    ):
+        teaser = _destination_teaser(str(current_destination))
+        if teaser:
+            response_to_user = f"{teaser}\n\n{response_to_user}" if response_to_user else teaser
+            travel_request[suggestion_marker] = current_destination
+
     if response_to_user:
         messages.append({"role": "assistant", "content": response_to_user})
 

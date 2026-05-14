@@ -125,6 +125,8 @@ def generate_autonomous_response(
         "YYYY-MM-DD dates and ask them to confirm. You may also capture travel_style when the user mentions it.\n\n"
         "Supported demo destinations are: " + supported_destinations + ". "
         "If the user asks for an unsupported destination, explain that this demo currently supports only those places.\n\n"
+        "When the user chooses a supported destination, briefly suggest 2-3 things they could do there before asking for budget. "
+        "Use only general suggestions or activities from the supported demo context; do not invent prices or availability at this stage.\n\n"
         "Always return ONLY valid JSON with exactly these three top-level keys:\n"
         "1. extracted_data: an object containing all known trip fields so far. Use keys: "
         "destination, departure_date, return_date, budget, travel_style. Dates must be YYYY-MM-DD. "
