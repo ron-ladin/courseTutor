@@ -45,7 +45,27 @@ def _fresh_state() -> AgentState:
         "reasoning_log": [],
         "backtrack_count": 0,
         "phase": "onboard",
+        "passenger_info": {},
+        "contact_info": {},
+        "payment_info": {},
     }
+
+
+_SAMPLE_PASSENGER = {
+    "full_name": "Alon Cohen",
+    "passport_number": "AB123456",
+    "date_of_birth": "1990-01-15",
+}
+_SAMPLE_CONTACT = {
+    "email": "alon@example.com",
+    "phone": "+972501234567",
+    "address": "123 Main St, Tel Aviv",
+}
+_SAMPLE_PAYMENT = {
+    "card_last4": "4242",
+    "cardholder_name": "ALON COHEN",
+    "card_expiry": "06/28",
+}
 
 
 # ── Task 11.1: Full end-to-end flow ──────────────────────────────────────────
@@ -95,6 +115,7 @@ def test_11_1_full_graph_onboard_to_rank():
 
 def test_11_1_confirm_node_produces_valid_booking():
     """Task 11.1: confirm_node integration — produces a valid UUID v4 booking."""
+    from unittest.mock import MagicMock
     from mock_server import _DATA
 
     flight = _DATA["Tokyo"]["flights"][0]
@@ -110,11 +131,21 @@ def test_11_1_confirm_node_produces_valid_booking():
     state = _fresh_state()
     state["selected_itinerary"] = itin
     state["phase"] = "confirm"
-    state = confirm_node(state)
+    state["passenger_info"] = _SAMPLE_PASSENGER
+    state["contact_info"] = _SAMPLE_CONTACT
+    state["payment_info"] = _SAMPLE_PAYMENT
+
+    mock_bid = str(uuid.uuid4())
+    with patch("agent.DataClient") as MockClient:
+        mc = MagicMock()
+        MockClient.return_value = mc
+        mc.book_flight.return_value = mock_bid
+        mc.book_hotel.return_value = str(uuid.uuid4())
+        mc.book_activity.return_value = str(uuid.uuid4())
+        state = confirm_node(state)
 
     assert state["phase"] == "done"
     assert state["booking"] is not None
-
     booking_uuid = uuid.UUID(state["booking"].booking_id)
     assert booking_uuid.version == 4
 
@@ -182,14 +213,15 @@ def test_11_2_paris_reasoning_log_contains_hotel_search():
         f"Expected hotel search entry for Paris in reasoning log. Got:\n{chr(10).join(log)}"
     )
 
-    # max_price must equal budget minus cheapest flight price
+    # max_price is now per-night: (budget - flight) / nights
     from mock_server import _DATA
     cheapest_flight = min(_DATA["Paris"]["flights"], key=lambda f: f.price)
-    expected_max = 1500.0 - cheapest_flight.price
+    nights = (date(2025, 4, 8) - date(2025, 4, 1)).days
+    expected_max_per_night = (1500.0 - cheapest_flight.price) / nights
     assert any(
-        f"max_price={expected_max:.2f}" in e for e in hotel_search_entries
+        f"max_price={expected_max_per_night:.0f}" in e for e in hotel_search_entries
     ), (
-        f"Expected max_price={expected_max:.2f} in log entries:\n{hotel_search_entries}"
+        f"Expected max_price={expected_max_per_night:.0f} in log entries:\n{hotel_search_entries}"
     )
 
 

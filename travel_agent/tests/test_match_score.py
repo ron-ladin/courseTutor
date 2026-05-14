@@ -11,7 +11,8 @@ tag = st.text(min_size=1, max_size=12).filter(lambda value: bool(value.strip()))
 
 @given(st.lists(tag, max_size=20), st.lists(tag, max_size=10))
 def test_compute_raw_score_counts_overlapping_tags(item_tags, user_style):
-    expected = float(sum(1 for item_tag in item_tags if item_tag in set(user_style)))
+    # Implementation uses set intersection (unique overlapping tags)
+    expected = float(len(set(item_tags) & set(user_style)))
 
     assert compute_raw_score(item_tags, user_style) == expected
 
