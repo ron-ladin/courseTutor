@@ -587,6 +587,7 @@ def _message_key(index: int, message: dict) -> str:
 def _stream_markdown(text: str) -> None:
     placeholder = st.empty()
     rendered = ""
+    text = text.replace("$", r"\$")
     chunks = text.split(" ")
 
     for index, chunk in enumerate(chunks):

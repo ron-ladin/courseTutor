@@ -100,8 +100,13 @@ _BOOKINGS: dict[str, dict] = {}
 # ── Search endpoints (GET) ────────────────────────────────────────────────────
 
 @flights_router.get("/search", response_model=list[Flight])
-def search_flights(destination: str, date: str = Query(...)) -> list[Flight]:
-    return _DATA.get(destination, {}).get("flights", [])
+def search_flights(
+    destination: str,
+    date: str = Query(...),
+    origin: str = Query(default="Tel Aviv"),
+) -> list[Flight]:
+    all_flights = _DATA.get(destination, {}).get("flights", [])
+    return [f for f in all_flights if f.origin == origin]
 
 
 @hotels_router.get("/search", response_model=list[Hotel])

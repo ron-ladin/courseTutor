@@ -615,6 +615,23 @@ def onboard_node(state: AgentState) -> AgentState:
         travel_request[suggestion_marker] = current_destination
         agent_status = "COLLECTING"
 
+    # Budget sanity check — warn before asking more questions
+    budget = travel_request.get("budget")
+    destination = travel_request.get("destination")
+    if budget is not None and destination is not None:
+        dest_flights = STATIC_DATA.get(str(destination), {}).get("flights", [])
+        if dest_flights:
+            min_flight_price = min(f.price for f in dest_flights)
+            if float(budget) < min_flight_price:
+                response_to_user = (
+                    f"That budget won't quite get you there — the cheapest flight to "
+                    f"{destination} starts at ${min_flight_price:.0f}, and your current "
+                    f"budget of ${float(budget):.0f} doesn't cover even the flight alone. "
+                    f"What budget were you thinking for this trip?"
+                )
+                travel_request.pop("budget", None)
+                agent_status = "COLLECTING"
+
     if response_to_user:
         messages.append({"role": "assistant", "content": response_to_user})
 

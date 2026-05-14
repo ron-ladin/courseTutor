@@ -16,12 +16,12 @@ def _build_catalog() -> None:
     destinations = {
         "Tokyo": {
             "flights": [
-                Flight(id="f1", destination="Tokyo", price=650, airline="ANA", duration_hours=14, style_tags=["adventure", "culture"]),
-                Flight(id="f2", destination="Tokyo", price=820, airline="JAL", duration_hours=12, style_tags=["luxury", "culture"]),
-                Flight(id="f9", destination="Tokyo", price=540, airline="Peach Aviation", duration_hours=15.5, style_tags=["budget", "adventure"]),
-                Flight(id="f10", destination="Tokyo", price=720, airline="Cathay Pacific", duration_hours=13.5, style_tags=["culture", "food"]),
-                Flight(id="f11", destination="Tokyo", price=980, airline="Singapore Airlines", duration_hours=11.5, style_tags=["luxury", "culture"]),
-                Flight(id="f12", destination="Tokyo", price=610, airline="Korean Air", duration_hours=14.2, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f1", destination="Tokyo", price=650, airline="ANA", duration_hours=14, style_tags=["adventure", "culture"]),
+                Flight(origin="Tel Aviv", id="f2", destination="Tokyo", price=820, airline="JAL", duration_hours=12, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f9", destination="Tokyo", price=540, airline="Peach Aviation", duration_hours=15.5, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f10", destination="Tokyo", price=720, airline="Cathay Pacific", duration_hours=13.5, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f11", destination="Tokyo", price=980, airline="Singapore Airlines", duration_hours=11.5, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f12", destination="Tokyo", price=610, airline="Korean Air", duration_hours=14.2, style_tags=["budget", "culture"]),
             ],
             "hotels": [
                 Hotel(id="h1", destination="Tokyo", name="Shinjuku Inn", price_per_night=120, stars=3, style_tags=["budget", "culture"]),
@@ -42,12 +42,12 @@ def _build_catalog() -> None:
         },
         "Paris": {
             "flights": [
-                Flight(id="f3", destination="Paris", price=400, airline="Air France", duration_hours=8, style_tags=["romance", "culture"]),
-                Flight(id="f4", destination="Paris", price=550, airline="Lufthansa", duration_hours=9, style_tags=["luxury", "romance"]),
-                Flight(id="f15", destination="Paris", price=360, airline="Transavia", duration_hours=9.5, style_tags=["budget", "romance"]),
-                Flight(id="f16", destination="Paris", price=480, airline="KLM", duration_hours=8.8, style_tags=["culture", "food"]),
-                Flight(id="f17", destination="Paris", price=720, airline="British Airways", duration_hours=7.9, style_tags=["luxury", "culture"]),
-                Flight(id="f19", destination="Paris", price=920, airline="La Compagnie", duration_hours=7.5, style_tags=["luxury", "romance"]),
+                Flight(origin="Tel Aviv", id="f3", destination="Paris", price=400, airline="Air France", duration_hours=8, style_tags=["romance", "culture"]),
+                Flight(origin="Tel Aviv", id="f4", destination="Paris", price=550, airline="Lufthansa", duration_hours=9, style_tags=["luxury", "romance"]),
+                Flight(origin="Tel Aviv", id="f15", destination="Paris", price=360, airline="Transavia", duration_hours=9.5, style_tags=["budget", "romance"]),
+                Flight(origin="Tel Aviv", id="f16", destination="Paris", price=480, airline="KLM", duration_hours=8.8, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f17", destination="Paris", price=720, airline="British Airways", duration_hours=7.9, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f19", destination="Paris", price=920, airline="La Compagnie", duration_hours=7.5, style_tags=["luxury", "romance"]),
             ],
             "hotels": [
                 Hotel(id="h3", destination="Paris", name="Le Grand Hotel", price_per_night=1800, stars=5, style_tags=["luxury", "romance"]),
@@ -68,12 +68,12 @@ def _build_catalog() -> None:
         },
         "Bali": {
             "flights": [
-                Flight(id="f5", destination="Bali", price=700, airline="Garuda", duration_hours=18, style_tags=["adventure", "nature"]),
-                Flight(id="f6", destination="Bali", price=850, airline="Singapore", duration_hours=16, style_tags=["luxury", "nature"]),
-                Flight(id="f20", destination="Bali", price=620, airline="AirAsia", duration_hours=20, style_tags=["budget", "adventure"]),
-                Flight(id="f21", destination="Bali", price=760, airline="Qatar Airways", duration_hours=17.5, style_tags=["luxury", "nature"]),
-                Flight(id="f22", destination="Bali", price=690, airline="Thai Airways", duration_hours=18.5, style_tags=["culture", "nature"]),
-                Flight(id="f24", destination="Bali", price=580, airline="Scoot", duration_hours=21, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f5", destination="Bali", price=700, airline="Garuda", duration_hours=18, style_tags=["adventure", "nature"]),
+                Flight(origin="Tel Aviv", id="f6", destination="Bali", price=850, airline="Singapore", duration_hours=16, style_tags=["luxury", "nature"]),
+                Flight(origin="Tel Aviv", id="f20", destination="Bali", price=620, airline="AirAsia", duration_hours=20, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f21", destination="Bali", price=760, airline="Qatar Airways", duration_hours=17.5, style_tags=["luxury", "nature"]),
+                Flight(origin="Tel Aviv", id="f22", destination="Bali", price=690, airline="Thai Airways", duration_hours=18.5, style_tags=["culture", "nature"]),
+                Flight(origin="Tel Aviv", id="f24", destination="Bali", price=580, airline="Scoot", duration_hours=21, style_tags=["budget", "adventure"]),
             ],
             "hotels": [
                 Hotel(id="h5", destination="Bali", name="Ubud Jungle Resort", price_per_night=90, stars=3, style_tags=["nature", "adventure"]),
@@ -94,12 +94,12 @@ def _build_catalog() -> None:
         },
         "New York": {
             "flights": [
-                Flight(id="f7", destination="New York", price=300, airline="Delta", duration_hours=6, style_tags=["culture", "food"]),
-                Flight(id="f8", destination="New York", price=420, airline="JetBlue", duration_hours=6, style_tags=["luxury", "culture"]),
-                Flight(id="f25", destination="New York", price=250, airline="Spirit", duration_hours=6.5, style_tags=["budget"]),
-                Flight(id="f26", destination="New York", price=360, airline="United", duration_hours=6.2, style_tags=["culture", "food"]),
-                Flight(id="f27", destination="New York", price=520, airline="American Airlines", duration_hours=5.8, style_tags=["luxury", "culture"]),
-                Flight(id="f28", destination="New York", price=610, airline="Delta One", duration_hours=5.6, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f7", destination="New York", price=300, airline="Delta", duration_hours=6, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f8", destination="New York", price=420, airline="JetBlue", duration_hours=6, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f25", destination="New York", price=250, airline="Spirit", duration_hours=6.5, style_tags=["budget"]),
+                Flight(origin="Tel Aviv", id="f26", destination="New York", price=360, airline="United", duration_hours=6.2, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f27", destination="New York", price=520, airline="American Airlines", duration_hours=5.8, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f28", destination="New York", price=610, airline="Delta One", duration_hours=5.6, style_tags=["luxury", "food"]),
             ],
             "hotels": [
                 Hotel(id="h7", destination="New York", name="Times Square Hotel", price_per_night=180, stars=3, style_tags=["culture", "food"]),
@@ -120,12 +120,12 @@ def _build_catalog() -> None:
         },
         "Kyoto": {
             "flights": [
-                Flight(id="f30", destination="Kyoto", price=680, airline="ANA", duration_hours=14, style_tags=["culture", "food"]),
-                Flight(id="f31", destination="Kyoto", price=790, airline="Japan Airlines", duration_hours=12.5, style_tags=["luxury", "culture"]),
-                Flight(id="f32", destination="Kyoto", price=560, airline="Korean Air", duration_hours=15, style_tags=["budget", "adventure"]),
-                Flight(id="f33", destination="Kyoto", price=980, airline="Singapore Airlines", duration_hours=13, style_tags=["luxury", "food"]),
-                Flight(id="f34", destination="Kyoto", price=720, airline="Cathay Pacific", duration_hours=13.5, style_tags=["culture", "food"]),
-                Flight(id="f35", destination="Kyoto", price=610, airline="Korean Air", duration_hours=14.2, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f30", destination="Kyoto", price=680, airline="ANA", duration_hours=14, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f31", destination="Kyoto", price=790, airline="Japan Airlines", duration_hours=12.5, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f32", destination="Kyoto", price=560, airline="Korean Air", duration_hours=15, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f33", destination="Kyoto", price=980, airline="Singapore Airlines", duration_hours=13, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f34", destination="Kyoto", price=720, airline="Cathay Pacific", duration_hours=13.5, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f35", destination="Kyoto", price=610, airline="Korean Air", duration_hours=14.2, style_tags=["budget", "culture"]),
             ],
             "hotels": [
                 Hotel(id="h32", destination="Kyoto", name="Kyoto Machiya Stay", price_per_night=130, stars=3, style_tags=["culture", "romance"]),
@@ -146,12 +146,12 @@ def _build_catalog() -> None:
         },
         "London": {
             "flights": [
-                Flight(id="f54", destination="London", price=420, airline="British Airways", duration_hours=7, style_tags=["culture", "luxury"]),
-                Flight(id="f55", destination="London", price=350, airline="Norse Atlantic", duration_hours=7.5, style_tags=["budget", "culture"]),
-                Flight(id="f56", destination="London", price=510, airline="Virgin Atlantic", duration_hours=6.8, style_tags=["food", "luxury"]),
-                Flight(id="f57", destination="London", price=460, airline="Aer Lingus", duration_hours=8, style_tags=["nature", "culture"]),
-                Flight(id="f58", destination="London", price=380, airline="KLM", duration_hours=7.3, style_tags=["culture", "food"]),
-                Flight(id="f59", destination="London", price=490, airline="Lufthansa", duration_hours=7.8, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f54", destination="London", price=420, airline="British Airways", duration_hours=7, style_tags=["culture", "luxury"]),
+                Flight(origin="Tel Aviv", id="f55", destination="London", price=350, airline="Norse Atlantic", duration_hours=7.5, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f56", destination="London", price=510, airline="Virgin Atlantic", duration_hours=6.8, style_tags=["food", "luxury"]),
+                Flight(origin="Tel Aviv", id="f57", destination="London", price=460, airline="Aer Lingus", duration_hours=8, style_tags=["nature", "culture"]),
+                Flight(origin="Tel Aviv", id="f58", destination="London", price=380, airline="KLM", duration_hours=7.3, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f59", destination="London", price=490, airline="Lufthansa", duration_hours=7.8, style_tags=["luxury", "culture"]),
             ],
             "hotels": [
                 Hotel(id="h56", destination="London", name="London Covent Garden Hotel", price_per_night=210, stars=4, style_tags=["culture", "food"]),
@@ -172,12 +172,12 @@ def _build_catalog() -> None:
         },
         "Barcelona": {
             "flights": [
-                Flight(id="f50", destination="Barcelona", price=390, airline="Iberia", duration_hours=8.5, style_tags=["culture", "food"]),
-                Flight(id="f51", destination="Barcelona", price=340, airline="LEVEL", duration_hours=9.2, style_tags=["budget", "culture"]),
-                Flight(id="f52", destination="Barcelona", price=620, airline="British Airways", duration_hours=8, style_tags=["luxury", "food"]),
-                Flight(id="f53", destination="Barcelona", price=520, airline="Air Europa", duration_hours=8.8, style_tags=["romance", "culture"]),
-                Flight(id="f60", destination="Barcelona", price=450, airline="Vueling", duration_hours=8.3, style_tags=["culture", "food"]),
-                Flight(id="f61", destination="Barcelona", price=380, airline="Ryanair", duration_hours=9, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f50", destination="Barcelona", price=390, airline="Iberia", duration_hours=8.5, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f51", destination="Barcelona", price=340, airline="LEVEL", duration_hours=9.2, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f52", destination="Barcelona", price=620, airline="British Airways", duration_hours=8, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f53", destination="Barcelona", price=520, airline="Air Europa", duration_hours=8.8, style_tags=["romance", "culture"]),
+                Flight(origin="Tel Aviv", id="f60", destination="Barcelona", price=450, airline="Vueling", duration_hours=8.3, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f61", destination="Barcelona", price=380, airline="Ryanair", duration_hours=9, style_tags=["budget", "adventure"]),
             ],
             "hotels": [
                 Hotel(id="h52", destination="Barcelona", name="Barcelona Gothic Quarter Hotel", price_per_night=145, stars=3, style_tags=["culture", "food"]),
@@ -198,12 +198,12 @@ def _build_catalog() -> None:
         },
         "Rome": {
             "flights": [
-                Flight(id="f38", destination="Rome", price=470, airline="ITA Airways", duration_hours=9, style_tags=["culture", "food"]),
-                Flight(id="f39", destination="Rome", price=420, airline="Norse Atlantic", duration_hours=10.5, style_tags=["budget", "adventure"]),
-                Flight(id="f40", destination="Rome", price=700, airline="Lufthansa", duration_hours=9.5, style_tags=["luxury", "culture"]),
-                Flight(id="f41", destination="Rome", price=560, airline="Turkish Airlines", duration_hours=11, style_tags=["food", "romance"]),
-                Flight(id="f62", destination="Rome", price=510, airline="Alitalia", duration_hours=10.2, style_tags=["culture", "food"]),
-                Flight(id="f63", destination="Rome", price=380, airline="easyJet", duration_hours=10.8, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f38", destination="Rome", price=470, airline="ITA Airways", duration_hours=9, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f39", destination="Rome", price=420, airline="Norse Atlantic", duration_hours=10.5, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f40", destination="Rome", price=700, airline="Lufthansa", duration_hours=9.5, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f41", destination="Rome", price=560, airline="Turkish Airlines", duration_hours=11, style_tags=["food", "romance"]),
+                Flight(origin="Tel Aviv", id="f62", destination="Rome", price=510, airline="Alitalia", duration_hours=10.2, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f63", destination="Rome", price=380, airline="easyJet", duration_hours=10.8, style_tags=["budget", "culture"]),
             ],
             "hotels": [
                 Hotel(id="h40", destination="Rome", name="Rome Trastevere Hotel", price_per_night=140, stars=3, style_tags=["culture", "food"]),
@@ -224,12 +224,12 @@ def _build_catalog() -> None:
         },
         "Bangkok": {
             "flights": [
-                Flight(id="f46", destination="Bangkok", price=590, airline="Thai Airways", duration_hours=17, style_tags=["culture", "food"]),
-                Flight(id="f47", destination="Bangkok", price=510, airline="AirAsia", duration_hours=19, style_tags=["budget", "adventure"]),
-                Flight(id="f48", destination="Bangkok", price=780, airline="Singapore Airlines", duration_hours=16, style_tags=["luxury", "food"]),
-                Flight(id="f49", destination="Bangkok", price=650, airline="Qatar Airways", duration_hours=18, style_tags=["nature", "culture"]),
-                Flight(id="f78", destination="Bangkok", price=620, airline="Emirates", duration_hours=17.5, style_tags=["luxury", "food"]),
-                Flight(id="f79", destination="Bangkok", price=540, airline="Scoot", duration_hours=19.5, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f46", destination="Bangkok", price=590, airline="Thai Airways", duration_hours=17, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f47", destination="Bangkok", price=510, airline="AirAsia", duration_hours=19, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f48", destination="Bangkok", price=780, airline="Singapore Airlines", duration_hours=16, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f49", destination="Bangkok", price=650, airline="Qatar Airways", duration_hours=18, style_tags=["nature", "culture"]),
+                Flight(origin="Tel Aviv", id="f78", destination="Bangkok", price=620, airline="Emirates", duration_hours=17.5, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f79", destination="Bangkok", price=540, airline="Scoot", duration_hours=19.5, style_tags=["budget", "adventure"]),
             ],
             "hotels": [
                 Hotel(id="h48", destination="Bangkok", name="Bangkok Riverside Hotel", price_per_night=95, stars=3, style_tags=["budget", "food"]),
@@ -250,12 +250,12 @@ def _build_catalog() -> None:
         },
         "Dubai": {
             "flights": [
-                Flight(id="f80", destination="Dubai", price=650, airline="Emirates", duration_hours=14, style_tags=["luxury", "food"]),
-                Flight(id="f81", destination="Dubai", price=520, airline="FlyDubai", duration_hours=15, style_tags=["budget", "adventure"]),
-                Flight(id="f82", destination="Dubai", price=810, airline="Etihad Airways", duration_hours=13.5, style_tags=["luxury", "culture"]),
-                Flight(id="f83", destination="Dubai", price=600, airline="Air Arabia", duration_hours=16, style_tags=["budget", "food"]),
-                Flight(id="f84", destination="Dubai", price=720, airline="Qatar Airways", duration_hours=14.5, style_tags=["luxury", "culture"]),
-                Flight(id="f85", destination="Dubai", price=470, airline="Flydubai", duration_hours=15.2, style_tags=["budget", "nature"]),
+                Flight(origin="Tel Aviv", id="f80", destination="Dubai", price=650, airline="Emirates", duration_hours=14, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f81", destination="Dubai", price=520, airline="FlyDubai", duration_hours=15, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f82", destination="Dubai", price=810, airline="Etihad Airways", duration_hours=13.5, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f83", destination="Dubai", price=600, airline="Air Arabia", duration_hours=16, style_tags=["budget", "food"]),
+                Flight(origin="Tel Aviv", id="f84", destination="Dubai", price=720, airline="Qatar Airways", duration_hours=14.5, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f85", destination="Dubai", price=470, airline="Flydubai", duration_hours=15.2, style_tags=["budget", "nature"]),
             ],
             "hotels": [
                 Hotel(id="h68", destination="Dubai", name="Burj Khalifa Suites", price_per_night=450, stars=5, style_tags=["luxury", "food"]),
@@ -276,12 +276,12 @@ def _build_catalog() -> None:
         },
         "Amsterdam": {
             "flights": [
-                Flight(id="f86", destination="Amsterdam", price=410, airline="KLM", duration_hours=8, style_tags=["culture", "romance"]),
-                Flight(id="f87", destination="Amsterdam", price=360, airline="Transavia", duration_hours=8.5, style_tags=["budget", "culture"]),
-                Flight(id="f88", destination="Amsterdam", price=580, airline="Air France", duration_hours=7.8, style_tags=["luxury", "culture"]),
-                Flight(id="f89", destination="Amsterdam", price=480, airline="Lufthansa", duration_hours=8.2, style_tags=["food", "culture"]),
-                Flight(id="f90", destination="Amsterdam", price=350, airline="easyJet", duration_hours=9, style_tags=["budget", "adventure"]),
-                Flight(id="f91", destination="Amsterdam", price=520, airline="Air Europa", duration_hours=8.3, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f86", destination="Amsterdam", price=410, airline="KLM", duration_hours=8, style_tags=["culture", "romance"]),
+                Flight(origin="Tel Aviv", id="f87", destination="Amsterdam", price=360, airline="Transavia", duration_hours=8.5, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f88", destination="Amsterdam", price=580, airline="Air France", duration_hours=7.8, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f89", destination="Amsterdam", price=480, airline="Lufthansa", duration_hours=8.2, style_tags=["food", "culture"]),
+                Flight(origin="Tel Aviv", id="f90", destination="Amsterdam", price=350, airline="easyJet", duration_hours=9, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f91", destination="Amsterdam", price=520, airline="Air Europa", duration_hours=8.3, style_tags=["culture", "food"]),
             ],
             "hotels": [
                 Hotel(id="h74", destination="Amsterdam", name="Canal Palace Hotel", price_per_night=180, stars=4, style_tags=["romance", "culture"]),
@@ -302,12 +302,12 @@ def _build_catalog() -> None:
         },
         "Athens": {
             "flights": [
-                Flight(id="f92", destination="Athens", price=520, airline="Aegean Airlines", duration_hours=10, style_tags=["culture", "romance"]),
-                Flight(id="f93", destination="Athens", price=460, airline="Norse Atlantic", duration_hours=11.5, style_tags=["budget", "nature"]),
-                Flight(id="f94", destination="Athens", price=740, airline="Emirates", duration_hours=10.5, style_tags=["luxury", "romance"]),
-                Flight(id="f95", destination="Athens", price=610, airline="Turkish Airlines", duration_hours=11, style_tags=["food", "culture"]),
-                Flight(id="f96", destination="Athens", price=380, airline="easyJet", duration_hours=11.5, style_tags=["budget", "culture"]),
-                Flight(id="f97", destination="Athens", price=650, airline="Air France", duration_hours=10.3, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f92", destination="Athens", price=520, airline="Aegean Airlines", duration_hours=10, style_tags=["culture", "romance"]),
+                Flight(origin="Tel Aviv", id="f93", destination="Athens", price=460, airline="Norse Atlantic", duration_hours=11.5, style_tags=["budget", "nature"]),
+                Flight(origin="Tel Aviv", id="f94", destination="Athens", price=740, airline="Emirates", duration_hours=10.5, style_tags=["luxury", "romance"]),
+                Flight(origin="Tel Aviv", id="f95", destination="Athens", price=610, airline="Turkish Airlines", duration_hours=11, style_tags=["food", "culture"]),
+                Flight(origin="Tel Aviv", id="f96", destination="Athens", price=380, airline="easyJet", duration_hours=11.5, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f97", destination="Athens", price=650, airline="Air France", duration_hours=10.3, style_tags=["luxury", "culture"]),
             ],
             "hotels": [
                 Hotel(id="h80", destination="Athens", name="Athens Plaka Hotel", price_per_night=120, stars=3, style_tags=["culture", "budget"]),
@@ -328,12 +328,12 @@ def _build_catalog() -> None:
         },
         "Singapore": {
             "flights": [
-                Flight(id="f98", destination="Singapore", price=680, airline="Singapore Airlines", duration_hours=18, style_tags=["luxury", "food"]),
-                Flight(id="f99", destination="Singapore", price=550, airline="AirAsia", duration_hours=19.5, style_tags=["budget", "adventure"]),
-                Flight(id="f100", destination="Singapore", price=820, airline="Cathay Pacific", duration_hours=17, style_tags=["luxury", "culture"]),
-                Flight(id="f101", destination="Singapore", price=710, airline="Thai Airways", duration_hours=18.5, style_tags=["culture", "food"]),
-                Flight(id="f102", destination="Singapore", price=490, airline="Scoot", duration_hours=20, style_tags=["budget", "adventure"]),
-                Flight(id="f103", destination="Singapore", price=600, airline="Emirates", duration_hours=17.5, style_tags=["luxury", "romance"]),
+                Flight(origin="Tel Aviv", id="f98", destination="Singapore", price=680, airline="Singapore Airlines", duration_hours=18, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f99", destination="Singapore", price=550, airline="AirAsia", duration_hours=19.5, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f100", destination="Singapore", price=820, airline="Cathay Pacific", duration_hours=17, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f101", destination="Singapore", price=710, airline="Thai Airways", duration_hours=18.5, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f102", destination="Singapore", price=490, airline="Scoot", duration_hours=20, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f103", destination="Singapore", price=600, airline="Emirates", duration_hours=17.5, style_tags=["luxury", "romance"]),
             ],
             "hotels": [
                 Hotel(id="h86", destination="Singapore", name="Marina Bay Luxury Towers", price_per_night=380, stars=5, style_tags=["luxury", "food"]),
@@ -354,12 +354,12 @@ def _build_catalog() -> None:
         },
         "Mexico City": {
             "flights": [
-                Flight(id="f104", destination="Mexico City", price=320, airline="Aeromexico", duration_hours=5, style_tags=["culture", "food"]),
-                Flight(id="f105", destination="Mexico City", price=280, airline="Viva Aerobus", duration_hours=5.5, style_tags=["budget", "adventure"]),
-                Flight(id="f106", destination="Mexico City", price=480, airline="Delta", duration_hours=5.2, style_tags=["luxury", "food"]),
-                Flight(id="f107", destination="Mexico City", price=390, airline="United", duration_hours=5.8, style_tags=["nature", "culture"]),
-                Flight(id="f108", destination="Mexico City", price=450, airline="American Airlines", duration_hours=5.3, style_tags=["culture", "food"]),
-                Flight(id="f109", destination="Mexico City", price=340, airline="Southwest", duration_hours=6, style_tags=["budget", "food"]),
+                Flight(origin="Tel Aviv", id="f104", destination="Mexico City", price=320, airline="Aeromexico", duration_hours=5, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f105", destination="Mexico City", price=280, airline="Viva Aerobus", duration_hours=5.5, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f106", destination="Mexico City", price=480, airline="Delta", duration_hours=5.2, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f107", destination="Mexico City", price=390, airline="United", duration_hours=5.8, style_tags=["nature", "culture"]),
+                Flight(origin="Tel Aviv", id="f108", destination="Mexico City", price=450, airline="American Airlines", duration_hours=5.3, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f109", destination="Mexico City", price=340, airline="Southwest", duration_hours=6, style_tags=["budget", "food"]),
             ],
             "hotels": [
                 Hotel(id="h92", destination="Mexico City", name="Mexico City Roma Hotel", price_per_night=110, stars=3, style_tags=["food", "culture"]),
@@ -380,12 +380,12 @@ def _build_catalog() -> None:
         },
         "Tel Aviv": {
             "flights": [
-                Flight(id="f110", destination="Tel Aviv", price=520, airline="El Al", duration_hours=11, style_tags=["culture", "food"]),
-                Flight(id="f111", destination="Tel Aviv", price=470, airline="Arkia", duration_hours=11.5, style_tags=["budget", "culture"]),
-                Flight(id="f112", destination="Tel Aviv", price=680, airline="United", duration_hours=10.8, style_tags=["luxury", "culture"]),
-                Flight(id="f113", destination="Tel Aviv", price=590, airline="Turkish Airlines", duration_hours=12, style_tags=["food", "romance"]),
-                Flight(id="f114", destination="Tel Aviv", price=610, airline="Lufthansa", duration_hours=11.5, style_tags=["luxury", "food"]),
-                Flight(id="f115", destination="Tel Aviv", price=400, airline="Wizz Air", duration_hours=12.5, style_tags=["budget", "adventure"]),
+                Flight(origin="Tel Aviv", id="f110", destination="Tel Aviv", price=520, airline="El Al", duration_hours=11, style_tags=["culture", "food"]),
+                Flight(origin="Tel Aviv", id="f111", destination="Tel Aviv", price=470, airline="Arkia", duration_hours=11.5, style_tags=["budget", "culture"]),
+                Flight(origin="Tel Aviv", id="f112", destination="Tel Aviv", price=680, airline="United", duration_hours=10.8, style_tags=["luxury", "culture"]),
+                Flight(origin="Tel Aviv", id="f113", destination="Tel Aviv", price=590, airline="Turkish Airlines", duration_hours=12, style_tags=["food", "romance"]),
+                Flight(origin="Tel Aviv", id="f114", destination="Tel Aviv", price=610, airline="Lufthansa", duration_hours=11.5, style_tags=["luxury", "food"]),
+                Flight(origin="Tel Aviv", id="f115", destination="Tel Aviv", price=400, airline="Wizz Air", duration_hours=12.5, style_tags=["budget", "adventure"]),
             ],
             "hotels": [
                 Hotel(id="h98", destination="Tel Aviv", name="Tel Aviv Beach Hotel", price_per_night=180, stars=4, style_tags=["food", "romance"]),

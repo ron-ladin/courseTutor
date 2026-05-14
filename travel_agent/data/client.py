@@ -174,12 +174,12 @@ class LiveDataClient:
 
     # ── Flights ───────────────────────────────────────────────────────────────
 
-    def get_flights(self, destination: str, date: str) -> list[Flight]:
+    def get_flights(self, destination: str, date: str, origin: str = "Tel Aviv") -> list[Flight]:
         if self._amadeus and destination in _DEST_IATA:
             try:
-                origin = os.environ.get("ORIGIN_IATA", _ORIGIN_IATA)
+                origin_iata = os.environ.get("ORIGIN_IATA", _ORIGIN_IATA)
                 resp = self._amadeus.shopping.flight_offers_search.get(
-                    originLocationCode=origin,
+                    originLocationCode=origin_iata,
                     destinationLocationCode=_DEST_IATA[destination],
                     departureDate=date,
                     adults=1,
@@ -200,6 +200,7 @@ class LiveDataClient:
                         )[0]
                         flights.append(Flight(
                             id=fid,
+                            origin=origin,
                             destination=destination,
                             price=float(offer["price"]["total"]),
                             airline=_carrier_name(carrier),
@@ -210,7 +211,8 @@ class LiveDataClient:
                         return flights
             except Exception:
                 pass
-        return list(STATIC_DATA.get(destination, {}).get("flights", []))
+        all_flights = STATIC_DATA.get(destination, {}).get("flights", [])
+        return [f for f in all_flights if f.origin == origin]
 
     # ── Hotels ────────────────────────────────────────────────────────────────
 

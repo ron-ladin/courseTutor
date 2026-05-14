@@ -31,6 +31,7 @@ class TravelRequest(BaseModel):
 
 class Flight(BaseModel):
     id: str
+    origin: str = "Tel Aviv"
     destination: str
     price: float
     airline: str

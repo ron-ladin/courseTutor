@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_system.py -q)",
+      "Bash(python -c ' *)",
+      "Bash(git reset *)"
+    ]
+  }
+}
