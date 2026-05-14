@@ -1,88 +1,24 @@
 from __future__ import annotations
 
-import os
 import re
 from datetime import date
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from .data.client import LiveDataClient
+    from .data_client import DataClient
+    from .openrouter_client import build_trip_explanation, extract_travel_request_fields
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from data.client import LiveDataClient
+    from data_client import DataClient
+    from openrouter_client import build_trip_explanation, extract_travel_request_fields
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
 from langgraph.graph import END, StateGraph
 
-# ── LLM client (optional — falls back to rule-based if key is absent) ─────────
-try:
-    import anthropic as _anthropic_sdk
-    _llm = _anthropic_sdk.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    _LLM_AVAILABLE = True
-except (ImportError, KeyError, Exception):
-    _llm = None
-    _LLM_AVAILABLE = False
 
-_MODEL = "claude-haiku-4-5-20251001"
-
-# ── System prompt ──────────────────────────────────────────────────────────────
-_SYSTEM_PROMPT = """\
-You are a professional travel planning assistant. Your job is to gather trip details
-through natural, friendly conversation and then trigger the planning engine.
-
-AVAILABLE DESTINATIONS: Tokyo, Paris, Bali, New York
-AVAILABLE TRAVEL STYLES: adventure, culture, luxury, romance, nature, food, budget
-
-RULES:
-- Be warm and conversational. Never robotic.
-- If the user gives multiple details in one message, extract them all at once.
-- Ask only for what is still missing. Never re-ask a question already answered.
-- If the user picks a destination not on the list, redirect them gently.
-- Budget must be a positive number. Return date must be strictly after departure date.
-- As soon as you have ALL FIVE fields (destination, departure_date, return_date,
-  budget, travel_style), call confirm_trip_details immediately — do not ask again.
-"""
-
-# ── Tool schema for the Anthropic API ─────────────────────────────────────────
-_CONFIRM_TOOL = {
-    "name": "confirm_trip_details",
-    "description": (
-        "Call this once you have collected ALL required trip details from the user. "
-        "This triggers the planning engine."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "destination": {
-                "type": "string",
-                "enum": ["Tokyo", "Paris", "Bali", "New York"],
-            },
-            "departure_date": {
-                "type": "string",
-                "description": "Departure date in YYYY-MM-DD format.",
-            },
-            "return_date": {
-                "type": "string",
-                "description": "Return date in YYYY-MM-DD format.",
-            },
-            "budget": {
-                "type": "number",
-                "description": "Total trip budget in USD. Must be positive.",
-            },
-            "travel_style": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Style tags from: adventure, culture, luxury, romance, nature, food, budget",
-            },
-        },
-        "required": ["destination", "departure_date", "return_date", "budget", "travel_style"],
-    },
-}
-
-
-# ── State definition ───────────────────────────────────────────────────────────
+# ── State definition ──────────────────────────────────────────────────────────
 
 class AgentState(TypedDict):
     messages:           list[dict]
@@ -94,137 +30,103 @@ class AgentState(TypedDict):
     reasoning_log:      list[str]
     backtrack_count:    int
     phase:              str   # "onboard" | "plan" | "rank" | "collect" | "confirm" | "done"
-    passenger_info:     dict
-    contact_info:       dict
-    payment_info:       dict
+    passenger_info:     dict  # full_name, passport_number, date_of_birth
+    contact_info:       dict  # email, phone, address
+    payment_info:       dict  # card_last4, cardholder_name, card_expiry
 
 
-# ── LLM helpers ────────────────────────────────────────────────────────────────
-
-def _to_claude_messages(messages: list[dict]) -> list[dict]:
-    """
-    Convert state messages to Claude API format.
-    Skips leading assistant messages (Claude requires user first) and
-    merges consecutive same-role messages to avoid API errors.
-    """
-    result: list[dict] = []
-    for msg in messages:
-        role = msg.get("role")
-        if role not in ("user", "assistant"):
-            continue
-        if not result and role == "assistant":
-            continue  # Claude cannot start with an assistant turn
-        if result and result[-1]["role"] == role:
-            result[-1]["content"] += "\n" + msg["content"]
-        else:
-            result.append({"role": role, "content": msg["content"]})
-    return result
-
-
-def _llm_rank_explanation(
-    itineraries: list[Itinerary],
-    travel_style: list[str],
-    budget: float,
-) -> str:
-    """
-    Ask the LLM to explain in 1-2 sentences why the top itinerary ranked highest.
-    Returns an empty string if the LLM is unavailable or the call fails.
-    """
-    if not _LLM_AVAILABLE or not itineraries:
-        return ""
-
-    lines = [
-        f"A traveler with style '{', '.join(travel_style) or 'any'}' "
-        f"and a ${budget:.0f} budget was shown these options:\n"
-    ]
-    for i, it in enumerate(itineraries):
-        lines.append(
-            f"Option {i+1}: {it.flight.airline} flight (${it.flight.price:.0f}, "
-            f"{it.flight.duration_hours}h) + {it.hotel.name} ({it.hotel.stars}★, "
-            f"${it.hotel.price_per_night:.0f}/night) + {len(it.activities)} activities. "
-            f"Total ${it.total_cost:.0f}, match {it.match_score:.0%}."
-            + (" [EXCEEDS BUDGET]" if it.is_partial_fallback else "")
-        )
-    lines.append(
-        "\nIn 1-2 sentences explain why Option 1 ranked highest. "
-        "Reference the user's style and any meaningful trade-offs."
-    )
-
-    try:
-        resp = _llm.messages.create(
-            model=_MODEL,
-            max_tokens=160,
-            messages=[{"role": "user", "content": "\n".join(lines)}],
-        )
-        return next((b.text for b in resp.content if b.type == "text"), "").strip()
-    except Exception:
-        return ""
-
-
-# ── Onboarding (rule-based fallback) ──────────────────────────────────────────
+# ── Onboarding ────────────────────────────────────────────────────────────────
 
 _FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
+
+_QUESTIONS = {
+    "destination":    "What is your destination? (Tokyo, Paris, Bali, New York)",
+    "departure_date": "What is your departure date? (YYYY-MM-DD)",
+    "return_date":    "What is your return date? (YYYY-MM-DD)",
+    "budget":         "What is your total budget in USD?",
+    "travel_style":   "What travel styles do you prefer? (e.g. adventure, culture, luxury)",
+}
 
 _VALID_DESTINATIONS = ["Tokyo", "Paris", "Bali", "New York"]
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
 
-_QUESTIONS = {
-    "destination":    f"What is your destination? Available: {', '.join(_VALID_DESTINATIONS)}",
-    "departure_date": "What is your departure date? (YYYY-MM-DD)",
-    "return_date":    "What is your return date? (YYYY-MM-DD)",
-    "budget":         "What is your total budget in USD?",
-    "travel_style":   f"What travel styles do you prefer? Choose from: {', '.join(_VALID_STYLES)} (comma-separated)",
-}
 
-_ACK = {
-    "destination":    lambda tr: f"Great, {tr['destination']}! ",
-    "departure_date": lambda tr: f"Departing on {tr['departure_date']}. ",
-    "return_date":    lambda tr: f"Returning on {tr['return_date']}. ",
-    "budget":         lambda tr: f"Budget: ${float(tr['budget']):.0f}. ",
-    "travel_style":   lambda tr: f"Style: {tr['travel_style']}. ",
-}
+def _local_extract_travel_fields(text: str) -> dict[str, Any]:
+    """Small non-AI fallback for natural customer messages."""
+    lowered = text.lower()
+    fields: dict[str, Any] = {}
+
+    for destination in _VALID_DESTINATIONS:
+        if destination.lower() in lowered:
+            fields["destination"] = destination
+            break
+
+    dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text)
+    if dates:
+        fields["departure_date"] = dates[0]
+    if len(dates) >= 2:
+        fields["return_date"] = dates[1]
+
+    budget_match = re.search(
+        r"(?:budget(?:\s+of)?|under|up to|max|maximum|around|about)\s*\$?\s*(\d{3,6})(?:\s*(?:usd|dollars))?",
+        lowered,
+    ) or re.search(r"\$\s*(\d{3,6})", lowered)
+    if budget_match:
+        fields["budget"] = budget_match.group(1)
+
+    styles = [
+        style for style in _VALID_STYLES
+        if style != "budget" and re.search(rf"\b{re.escape(style)}\b", lowered)
+    ]
+    if re.search(r"\bbudget\s+(?:travel|trip|style|friendly)\b", lowered):
+        styles.append("budget")
+    if styles:
+        fields["travel_style"] = styles
+
+    return fields
+
+
+def _apply_extracted_fields(tr: dict, extracted: dict[str, Any]) -> None:
+    for field in _FIELD_ORDER:
+        if field not in extracted or field in tr:
+            continue
+        value = extracted[field]
+        if field == "travel_style" and isinstance(value, list):
+            value = ", ".join(str(item) for item in value if str(item).strip())
+        if value is None or value == "":
+            continue
+        error = _validate_and_store(field, str(value), tr)
+        if error:
+            tr.pop(field, None)
 
 
 def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
-    if field == "destination":
-        match = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
-        if not match:
-            return f"'{value.strip()}' isn't available. Please choose from: {', '.join(_VALID_DESTINATIONS)}."
-        tr["destination"] = match
-
-    elif field == "travel_style":
-        styles = [s.strip().lower() for s in value.split(",") if s.strip()]
-        valid = [s for s in styles if s in _VALID_STYLES]
-        if not valid:
-            return f"Please choose at least one from: {', '.join(_VALID_STYLES)}."
-        tr["travel_style"] = ", ".join(valid)
-
-    elif field == "budget":
+    """Store validated value in tr. Returns an error message string, or None on success."""
+    if field == "budget":
         try:
-            b = float(value.replace("$", "").replace(",", ""))
-            if b <= 0:
+            budget = float(value.replace("$", "").replace(",", ""))
+            if budget <= 0:
                 return "Please enter a positive number for your budget."
-            tr["budget"] = b
+            tr["budget"] = budget
         except ValueError:
-            return "Please enter a valid number for your budget (e.g. 2000)."
-
+            return "Please enter a valid number for your budget."
     elif field == "departure_date":
         try:
-            date.fromisoformat(value.strip())
-            tr["departure_date"] = value.strip()
+            date.fromisoformat(value)
+            tr["departure_date"] = value
         except ValueError:
-            return "Please enter a valid date in YYYY-MM-DD format (e.g. 2025-06-01)."
-
+            return "Please enter a valid date (YYYY-MM-DD)."
     elif field == "return_date":
         try:
-            ret = date.fromisoformat(value.strip())
+            ret = date.fromisoformat(value)
             dep = date.fromisoformat(tr["departure_date"])
             if ret <= dep:
-                return f"Return date must be after {tr['departure_date']}. Please re-enter."
-            tr["return_date"] = value.strip()
+                return "Return date must be after departure date."
+            tr["return_date"] = value
         except ValueError:
-            return "Please enter a valid date in YYYY-MM-DD format (e.g. 2025-06-08)."
-
+            return "Please enter a valid date (YYYY-MM-DD)."
+    else:
+        tr[field] = value
     return None
 
 
@@ -270,10 +172,11 @@ def _build_confirmed_request(state: AgentState, messages: list, tr: dict) -> Age
     return state
 
 
-def _rule_based_onboard(state: AgentState) -> AgentState:
+def onboard_node(state: AgentState) -> AgentState:
     """
-    Sequential onboarding without LLM — used when ANTHROPIC_API_KEY is absent
-    or when the LLM call fails. One field per graph.invoke() call.
+    Sequential onboarding: one field per graph.invoke() call.
+    Reads the latest user message, validates + stores the answer, then asks
+    the next question or shows the confirmation prompt.
     """
     messages = list(state.get("messages", []))
     tr = dict(state.get("travel_request", {}))
@@ -285,8 +188,15 @@ def _rule_based_onboard(state: AgentState) -> AgentState:
     next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
 
     if last_user is not None:
+        handled_as_natural_message = False
         if next_field is not None:
-            stored_field = next_field
+            extracted = extract_travel_request_fields(last_user) or _local_extract_travel_fields(last_user)
+            if len(extracted) > 1:
+                _apply_extracted_fields(tr, extracted)
+                next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
+                handled_as_natural_message = True
+
+        if next_field is not None and not handled_as_natural_message:
             error = _validate_and_store(next_field, last_user, tr)
             if error:
                 messages.append({"role": "assistant", "content": error})
@@ -294,22 +204,13 @@ def _rule_based_onboard(state: AgentState) -> AgentState:
                 state["travel_request"] = tr
                 return state
             next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
-            # Acknowledge the stored answer, then ask next question or show summary
-            ack = _ACK[stored_field](tr)
-            if next_field is not None:
-                messages.append({"role": "assistant", "content": ack + _QUESTIONS[next_field]})
-            else:
-                messages.append({"role": "assistant", "content": ack + "\n\n" + _summary_text(tr)})
-            state["messages"] = messages
-            state["travel_request"] = tr
-            state["phase"] = "onboard"
-            return state
-        else:
+        elif next_field is None and not handled_as_natural_message:
+            # All fields filled — this message is the yes/no confirmation
             if last_user.lower() in ("yes", "y", "confirm", "ok"):
                 return _build_confirmed_request(state, messages, tr)
             elif last_user.lower() in ("no", "n"):
                 tr = {}
-                messages.append({"role": "assistant", "content": "No problem! Let's start over.\n\n" + _QUESTIONS["destination"]})
+                messages.append({"role": "assistant", "content": "No problem! Where would you like to travel? (Tokyo, Paris, Bali, New York)"})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"
@@ -335,111 +236,7 @@ def _rule_based_onboard(state: AgentState) -> AgentState:
     return state
 
 
-# ── Onboarding (LLM-powered) ───────────────────────────────────────────────────
-
-def onboard_node(state: AgentState) -> AgentState:
-    """
-    LLM-powered onboarding (Plan A).
-
-    The LLM receives the full conversation history and a system prompt.
-    It either asks a natural follow-up question OR calls confirm_trip_details
-    when it has all five required fields — which transitions phase to 'plan'.
-
-    Falls back to _rule_based_onboard if ANTHROPIC_API_KEY is not set.
-    """
-    if not _LLM_AVAILABLE:
-        return _rule_based_onboard(state)
-
-    messages = list(state.get("messages", []))
-
-    # First load — send a friendly greeting without an API call
-    if not messages:
-        messages.append({
-            "role": "assistant",
-            "content": (
-                "Hello! I'm your AI travel planning assistant. "
-                "Tell me about the trip you have in mind — where you'd like to go, "
-                "when, your budget, and the kind of experience you're after."
-            ),
-        })
-        state["messages"] = messages
-        return state
-
-    # Nothing to respond to if the last message is already from the assistant
-    if messages[-1].get("role") != "user":
-        state["messages"] = messages
-        return state
-
-    claude_msgs = _to_claude_messages(messages)
-    if not claude_msgs:
-        state["messages"] = messages
-        return state
-
-    try:
-        response = _llm.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            tools=[_CONFIRM_TOOL],
-            messages=claude_msgs,
-        )
-
-        if response.stop_reason == "tool_use":
-            # LLM is confident it has all details — extract and confirm
-            tool_block = next(b for b in response.content if b.type == "tool_use")
-            inp = tool_block.input
-
-            # Any text Claude sent alongside the tool call
-            text_blocks = [b for b in response.content if b.type == "text" and b.text.strip()]
-
-            try:
-                confirmed = TravelRequest(
-                    destination=inp["destination"],
-                    departure_date=date.fromisoformat(inp["departure_date"]),
-                    return_date=date.fromisoformat(inp["return_date"]),
-                    budget=float(inp["budget"]),
-                    travel_style=inp.get("travel_style", []),
-                )
-                state["confirmed_request"] = confirmed
-                state["phase"] = "plan"
-
-                text = text_blocks[0].text if text_blocks else (
-                    f"Perfect! I have everything I need. Searching for the best "
-                    f"{', '.join(confirmed.travel_style)} options in {confirmed.destination} "
-                    f"({confirmed.departure_date} → {confirmed.return_date}, "
-                    f"budget ${confirmed.budget:.0f})..."
-                )
-                messages.append({"role": "assistant", "content": text})
-
-            except Exception as e:
-                # Pydantic validation failed — ask the LLM to correct it
-                messages.append({
-                    "role": "assistant",
-                    "content": f"There's an issue with those details: {e}. Could you double-check the dates and budget?",
-                })
-
-        else:
-            # Regular conversational response
-            text = next((b.text for b in response.content if b.type == "text"), "")
-            if text:
-                messages.append({"role": "assistant", "content": text})
-
-    except Exception:
-        # LLM call failed — degrade gracefully for this turn
-        messages.append({
-            "role": "assistant",
-            "content": (
-                "I'm having a connectivity issue. Let me ask you directly: "
-                "where would you like to travel? (Tokyo, Paris, Bali, New York)"
-            ),
-        })
-
-    state["messages"] = messages
-    state["phase"] = state.get("phase", "onboard")
-    return state
-
-
-# ── Plan & Rank ────────────────────────────────────────────────────────────────
+# ── Plan & Rank ───────────────────────────────────────────────────────────────
 
 def plan_node(state: AgentState) -> AgentState:
     messages = list(state.get("messages", []))
@@ -452,12 +249,7 @@ def plan_node(state: AgentState) -> AgentState:
         return state
 
     try:
-        client = LiveDataClient()
-        if getattr(client, "using_live_flights", False):
-            reasoning_log.append("✈ Using live Amadeus flight data.")
-        else:
-            reasoning_log.append("📋 Using static flight data (set AMADEUS_CLIENT_ID + AMADEUS_CLIENT_SECRET for live data).")
-        itineraries = run_planning_loop(confirmed, client, reasoning_log)
+        itineraries = run_planning_loop(confirmed, DataClient(), reasoning_log)
         state["itineraries"] = itineraries
         state["reasoning_log"] = reasoning_log
         state["phase"] = "rank"
@@ -499,7 +291,6 @@ def rank_node(state: AgentState) -> AgentState:
     itineraries.sort(key=lambda it: it.match_score, reverse=True)
     itineraries = itineraries[:3]
 
-    # Static trade-off log (always present)
     if not any("Trade-off Analysis" in e for e in reasoning_log):
         reasoning_log.append("Trade-off Analysis:")
         for i, it in enumerate(itineraries):
@@ -508,16 +299,17 @@ def rank_node(state: AgentState) -> AgentState:
                 f"(Match: {it.match_score:.0%}, Cost: ${it.total_cost:.2f})"
             )
 
-    # LLM-generated natural language explanation (Requirement 4)
-    explanation = _llm_rank_explanation(itineraries, confirmed.travel_style, confirmed.budget)
-    if explanation:
-        reasoning_log.append(f"AI: {explanation}")
-
     state["itineraries"] = itineraries
     state["reasoning_log"] = reasoning_log
     state["phase"] = "rank"
 
-    options_text = "Here are your top options:\n\n"
+    ai_explanation = build_trip_explanation(confirmed, itineraries)
+    options_text = ""
+    if ai_explanation:
+        options_text += f"{ai_explanation}\n\n"
+        reasoning_log.append("OpenRouter generated a grounded customer-facing answer from mock itinerary data.")
+
+    options_text += "Here are the mock-data options I found:\n\n"
     for i, it in enumerate(itineraries):
         activities = ", ".join(a.name for a in it.activities) or "None"
         fallback = " [Exceeds Budget]" if it.is_partial_fallback else ""
@@ -528,13 +320,16 @@ def rank_node(state: AgentState) -> AgentState:
             f"  Activities: {activities}\n"
             f"  Total: ${it.total_cost:.2f}\n\n"
         )
+
     messages.append({"role": "assistant", "content": options_text})
     state["messages"] = messages
+    state["reasoning_log"] = reasoning_log
     return state
 
 
-# ── Passenger / payment collection ────────────────────────────────────────────
+# ── Passenger / payment collection ───────────────────────────────────────────
 
+# Each tuple: (field_name, state_dict_key, question_prompt)
 _COLLECT_FIELDS: list[tuple[str, str, str]] = [
     ("full_name",       "passenger_info", "Passenger's full legal name:"),
     ("passport_number", "passenger_info", "Passport number:"),
@@ -549,6 +344,7 @@ _COLLECT_FIELDS: list[tuple[str, str, str]] = [
 
 
 def _validate_collect_field(field: str, value: str) -> Optional[str]:
+    """Returns an error string or None if the value is valid."""
     if field == "date_of_birth":
         try:
             date.fromisoformat(value)
@@ -563,8 +359,12 @@ def _validate_collect_field(field: str, value: str) -> Optional[str]:
     return None
 
 
-def _next_collect_field(p: dict, c: dict, pay: dict) -> Optional[tuple[str, str, str]]:
-    stores = {"passenger_info": p, "contact_info": c, "payment_info": pay}
+def _next_collect_field(
+    passenger_info: dict,
+    contact_info: dict,
+    payment_info: dict,
+) -> Optional[tuple[str, str, str]]:
+    stores = {"passenger_info": passenger_info, "contact_info": contact_info, "payment_info": payment_info}
     for field, key, prompt in _COLLECT_FIELDS:
         if field not in stores[key]:
             return field, key, prompt
@@ -573,9 +373,9 @@ def _next_collect_field(p: dict, c: dict, pay: dict) -> Optional[tuple[str, str,
 
 def collect_passenger_node(state: AgentState) -> AgentState:
     """
-    Sequential structured collection of passenger, contact, and payment details.
-    Rule-based (not LLM) — structured data collection is more reliable as a form.
-    Advances to phase='confirm' when all 9 fields are collected.
+    Sequential collection of passenger, contact, and payment details.
+    One field per graph.invoke() call, with inline validation.
+    Advances to phase 'confirm' when all 9 fields are collected.
     """
     messages      = list(state.get("messages", []))
     passenger_info = dict(state.get("passenger_info", {}))
@@ -583,7 +383,11 @@ def collect_passenger_node(state: AgentState) -> AgentState:
     payment_info   = dict(state.get("payment_info",   {}))
     reasoning_log  = list(state.get("reasoning_log",  []))
 
-    stores = {"passenger_info": passenger_info, "contact_info": contact_info, "payment_info": payment_info}
+    stores = {
+        "passenger_info": passenger_info,
+        "contact_info":   contact_info,
+        "payment_info":   payment_info,
+    }
 
     last_user: Optional[str] = None
     if messages and messages[-1].get("role") == "user":
@@ -607,6 +411,7 @@ def collect_passenger_node(state: AgentState) -> AgentState:
         _, _, prompt = next_field
         messages.append({"role": "assistant", "content": prompt})
     else:
+        # All collected — show summary and advance to confirm
         reasoning_log.append("All passenger and payment details collected.")
         state["phase"] = "confirm"
         messages.append({
@@ -623,7 +428,7 @@ def collect_passenger_node(state: AgentState) -> AgentState:
         })
 
     state.update({
-        "messages":       messages,
+        "messages":      messages,
         "passenger_info": passenger_info,
         "contact_info":   contact_info,
         "payment_info":   payment_info,
@@ -632,12 +437,12 @@ def collect_passenger_node(state: AgentState) -> AgentState:
     return state
 
 
-# ── Confirm & book ─────────────────────────────────────────────────────────────
+# ── Confirm & book ────────────────────────────────────────────────────────────
 
 def confirm_node(state: AgentState) -> AgentState:
     """
-    POSTs each component to the mock server and assembles a BookingConfirmation
-    with the server-issued IDs. Sets phase='done'.
+    Calls the mock server to POST-book each component (flight, hotel, activities),
+    assembles a BookingConfirmation with the server-issued IDs, and sets phase='done'.
     """
     messages       = list(state.get("messages", []))
     selected       = state.get("selected_itinerary")
@@ -660,13 +465,13 @@ def confirm_node(state: AgentState) -> AgentState:
         )
         contact = ContactInfo(**contact_info)
         payment = PaymentInfo(**payment_info)
-        client  = LiveDataClient()
+        client  = DataClient()
 
-        reasoning_log.append(f"Booking flight {selected.flight.id} ({selected.flight.airline})...")
+        reasoning_log.append(f"Booking {selected.flight.airline} flight ({selected.flight.id})...")
         flight_bid = client.book_flight(selected.flight.id, passenger, contact, payment)
         reasoning_log.append(f"Flight confirmed → {flight_bid}")
 
-        reasoning_log.append(f"Booking hotel {selected.hotel.id} ({selected.hotel.name})...")
+        reasoning_log.append(f"Booking {selected.hotel.name} ({selected.hotel.id})...")
         hotel_bid = client.book_hotel(selected.hotel.id, passenger, contact, payment)
         reasoning_log.append(f"Hotel confirmed → {hotel_bid}")
 
@@ -712,21 +517,22 @@ def confirm_node(state: AgentState) -> AgentState:
     return state
 
 
-# ── Graph ──────────────────────────────────────────────────────────────────────
+# ── Graph ─────────────────────────────────────────────────────────────────────
 
 def build_graph():
     """
-    Router entry dispatches by phase so every graph.invoke() resumes at the
-    correct node rather than always restarting onboarding.
+    Graph entry point is a router node that dispatches by phase so that
+    every graph.invoke() resumes at exactly the right node rather than
+    always re-entering onboarding.
 
     Flow:
-      onboard  → (LLM conversation) → plan → rank → END  (wait for option select)
-      collect  → END                                      (wait for next field answer)
-      confirm  → END                                      (booking complete)
+      onboard  → plan → rank → END  (wait for user to select option)
+      collect  → END               (wait for next passenger-detail answer)
+      confirm  → END               (booking complete)
     """
     g = StateGraph(AgentState)
 
-    g.add_node("router",            lambda s: s)
+    g.add_node("router",            lambda s: s)  # pass-through dispatcher
     g.add_node("onboard",           onboard_node)
     g.add_node("plan",              plan_node)
     g.add_node("rank",              rank_node)
@@ -735,6 +541,7 @@ def build_graph():
 
     g.set_entry_point("router")
 
+    # Route to the correct node based on current phase
     def _dispatch(s: AgentState) -> str:
         phase = s.get("phase", "onboard")
         if phase == "collect":
@@ -749,13 +556,14 @@ def build_graph():
         {"collect": "collect_passenger", "confirm": "confirm", "onboard": "onboard"},
     )
 
+    # After onboard: proceed to plan only when user confirmed the request
     g.add_conditional_edges(
         "onboard",
         lambda s: "plan" if s.get("confirmed_request") else END,
         {"plan": "plan", END: END},
     )
 
-    g.add_edge("plan",              "rank")
+    g.add_edge("plan", "rank")
     g.add_edge("rank",              END)
     g.add_edge("collect_passenger", END)
     g.add_edge("confirm",           END)
