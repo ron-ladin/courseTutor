@@ -7,25 +7,21 @@ from typing import Any, Optional, TypedDict
 try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
     from .data.client import LiveDataClient as DataClient
-    from .data.static import STATIC_DATA
     from .openrouter_client import (
         build_trip_explanation,
-        extract_travel_request_fields,
         extract_passenger_fields,
+        generate_autonomous_response,
         generate_conversational_prompt,
-        generate_travel_followup,
     )
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
     from data.client import LiveDataClient as DataClient
-    from data.static import STATIC_DATA
     from openrouter_client import (
         build_trip_explanation,
-        extract_travel_request_fields,
         extract_passenger_fields,
+        generate_autonomous_response,
         generate_conversational_prompt,
-        generate_travel_followup,
     )
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
@@ -46,6 +42,7 @@ class AgentState(TypedDict):
     reasoning_log:      list[str]
     backtrack_count:    int
     phase:              str   # "onboard" | "plan" | "rank" | "collect" | "confirm" | "done"
+    agent_status:       str   # "COLLECTING" | "READY_TO_PROPOSE" | "APPROVED"
     passenger_info:     dict  # full_name, passport_number, date_of_birth
     contact_info:       dict  # email, phone, address
     payment_info:       dict  # card_last4, cardholder_name, card_expiry
@@ -53,226 +50,124 @@ class AgentState(TypedDict):
 
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
-_FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
-
-_QUESTIONS = {
-    "destination":    "Great, let us start with the fun part. Where would you like to fly today? You can choose a city or country, like Tokyo, Greece, Thailand, Mexico, or Israel.",
-    "departure_date": "Nice choice. What date would you like to depart? Please use YYYY-MM-DD so I can plan accurately.",
-    "return_date":    "And when should you come back? Send the return date in YYYY-MM-DD format.",
-    "budget":         "Perfect. What total budget should I keep in mind for the trip, in USD?",
-    "travel_style":   "What travel style should this feel like: adventure, culture, luxury, romance, nature, food, or budget-friendly?",
-}
-
-_VALID_DESTINATIONS = sorted(STATIC_DATA.keys(), key=len, reverse=True)
-_VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
+_TRAVEL_FIELDS = {"destination", "departure_date", "return_date", "budget", "travel_style"}
 
 
-def _ask_for_field(field: str, tr: dict, messages: list[dict], last_user: str | None = None) -> str:
-    if last_user is None:
-        opening_questions = {
-            "destination": "Hi, I am SkySwift AI. Tell me your destination, and I will help shape the trip from there.",
-        }
-        return opening_questions.get(field, _QUESTIONS[field])
-    return (
-        generate_travel_followup(field, tr, messages, last_user)
-        or _QUESTIONS[field]
-    )
+def _merge_extracted_preferences(current: dict, extracted: dict[str, Any]) -> dict:
+    """Merge model-extracted travel fields into the persisted request state."""
+    merged = dict(current or {})
+    for key, value in (extracted or {}).items():
+        if key not in _TRAVEL_FIELDS or value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        merged[key] = value
+    return merged
 
 
-def _local_extract_travel_fields(text: str) -> dict[str, Any]:
-    """Small non-AI fallback for natural customer messages."""
-    lowered = text.lower()
-    fields: dict[str, Any] = {}
+def _normalise_travel_style(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return [str(value).strip()] if str(value).strip() else []
 
-    for destination in _VALID_DESTINATIONS:
-        if destination.lower() in lowered:
-            fields["destination"] = destination
-            break
 
-    dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text)
-    if dates:
-        fields["departure_date"] = dates[0]
-    if len(dates) >= 2:
-        fields["return_date"] = dates[1]
+def _coerce_budget(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = (
+            value.lower()
+            .replace("$", "")
+            .replace(",", "")
+            .replace("usd", "")
+            .replace("dollars", "")
+            .strip()
+        )
+        return float(cleaned)
+    return float(value)
 
-    budget_match = re.search(
-        r"(?:budget(?:\s+of)?|under|up to|max|maximum|around|about)\s*\$?\s*(\d{3,6})(?:\s*(?:usd|dollars))?",
-        lowered,
-    ) or re.search(r"\$\s*(\d{3,6})", lowered)
-    if budget_match:
-        fields["budget"] = budget_match.group(1)
 
-    styles = [
-        style for style in _VALID_STYLES
-        if style != "budget" and re.search(rf"\b{re.escape(style)}\b", lowered)
+def _build_confirmed_request_from_preferences(
+    state: AgentState,
+    tr: dict,
+) -> tuple[Optional[TravelRequest], Optional[str]]:
+    """Validate the LLM-extracted preferences and build the final TravelRequest."""
+    missing = [
+        field
+        for field in ("destination", "departure_date", "return_date", "budget")
+        if field not in tr
     ]
-    if "romantic" in lowered and "romance" not in styles:
-        styles.append("romance")
-    if re.search(r"\bbudget\s+(?:travel|trip|style|friendly)\b", lowered):
-        styles.append("budget")
-    if styles:
-        fields["travel_style"] = styles
+    if missing:
+        return None, "Missing trip details: " + ", ".join(missing)
 
-    return fields
-
-
-def _apply_extracted_fields(tr: dict, extracted: dict[str, Any]) -> None:
-    for field in _FIELD_ORDER:
-        if field not in extracted or field in tr:
-            continue
-        value = extracted[field]
-        if field == "travel_style" and isinstance(value, list):
-            value = ", ".join(str(item) for item in value if str(item).strip())
-        if value is None or value == "":
-            continue
-        error = _validate_and_store(field, str(value), tr)
-        if error:
-            tr.pop(field, None)
-
-
-def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
-    """Store validated value in tr. Returns an error message string, or None on success."""
-    if field == "destination":
-        destination = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
-        if destination is None:
-            return "I can help with Tokyo, Paris, Bali, New York, Japan, France, Italy, Greece, Thailand, Spain, United Kingdom, Mexico, or Israel. Where would you like to go?"
-        tr["destination"] = destination
-    elif field == "budget":
-        try:
-            budget = float(value.replace("$", "").replace(",", ""))
-            if budget <= 0:
-                return "Please enter a positive number for your budget."
-            tr["budget"] = budget
-        except ValueError:
-            return "Please enter a valid number for your budget."
-    elif field == "departure_date":
-        try:
-            date.fromisoformat(value)
-            tr["departure_date"] = value
-        except ValueError:
-            return "Please enter a valid date (YYYY-MM-DD)."
-    elif field == "return_date":
-        try:
-            ret = date.fromisoformat(value)
-            dep = date.fromisoformat(tr["departure_date"])
-            if ret <= dep:
-                return "Return date must be after departure date."
-            tr["return_date"] = value
-        except ValueError:
-            return "Please enter a valid date (YYYY-MM-DD)."
-    elif field == "travel_style":
-        tr[field] = value
-    else:
-        tr[field] = value
-    return None
-
-
-def _summary_text(tr: dict) -> str:
-    return (
-        f"Here is your trip summary:\n"
-        f"- Destination: {tr['destination']}\n"
-        f"- Dates: {tr['departure_date']} → {tr['return_date']}\n"
-        f"- Budget: ${float(tr['budget']):.0f}\n"
-        f"- Style: {tr['travel_style']}\n\n"
-        "Shall I proceed with planning? (yes / no)"
-    )
-
-
-def _build_confirmed_request(state: AgentState, messages: list, tr: dict) -> AgentState:
     try:
-        style_raw = tr.get("travel_style", "")
-        travel_style = (
-            [t.strip() for t in style_raw.split(",") if t.strip()]
-            if isinstance(style_raw, str) else style_raw
-        )
         confirmed = TravelRequest(
-            destination=tr["destination"],
-            departure_date=date.fromisoformat(tr["departure_date"]),
-            return_date=date.fromisoformat(tr["return_date"]),
-            budget=float(tr["budget"]),
-            travel_style=travel_style,
+            destination=str(tr["destination"]).strip(),
+            departure_date=date.fromisoformat(str(tr["departure_date"]).strip()),
+            return_date=date.fromisoformat(str(tr["return_date"]).strip()),
+            budget=_coerce_budget(tr["budget"]),
+            travel_style=_normalise_travel_style(tr.get("travel_style")),
         )
-        state["confirmed_request"] = confirmed
-        state["phase"] = "plan"
-        messages.append({
-            "role": "assistant",
-            "content": (
-                f"Planning your trip to {confirmed.destination}...\n"
-                f"Dates: {confirmed.departure_date} → {confirmed.return_date} | "
-                f"Budget: ${confirmed.budget:.0f} | Style: {', '.join(confirmed.travel_style)}"
-            ),
-        })
-    except Exception as e:
-        messages.append({"role": "assistant", "content": f"Validation error: {e}. Please check your inputs."})
-    state["messages"] = messages
-    state["travel_request"] = tr
-    return state
+        return confirmed, None
+    except Exception as exc:
+        return None, f"Validation error: {exc}"
 
 
 def onboard_node(state: AgentState) -> AgentState:
     """
-    Sequential onboarding: one field per graph.invoke() call.
-    Reads the latest user message, validates + stores the answer, then asks
-    the next question or shows the confirmation prompt.
+    Autonomous onboarding node.
+
+    The LLM owns the conversation strategy and returns structured JSON with:
+      extracted_data, agent_status, response_to_user.
+
+    This node only persists the extracted state and routes the graph forward
+    when the user explicitly approves planning.
     """
     messages = list(state.get("messages", []))
-    tr = dict(state.get("travel_request", {}))
+    travel_request = dict(state.get("travel_request", {}))
 
-    last_user: Optional[str] = None
-    if messages and messages[-1].get("role") == "user":
-        last_user = messages[-1]["content"].strip()
+    llm_response = generate_autonomous_response(messages, travel_request)
 
-    next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
+    extracted = llm_response.get("extracted_data", {})
+    if not isinstance(extracted, dict):
+        extracted = {}
 
-    if last_user is not None:
-        handled_as_natural_message = False
-        if next_field is not None:
-            extracted = extract_travel_request_fields(last_user) or _local_extract_travel_fields(last_user)
-            if len(extracted) > 1:
-                _apply_extracted_fields(tr, extracted)
-                next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
-                handled_as_natural_message = True
+    travel_request = _merge_extracted_preferences(travel_request, extracted)
 
-        if next_field is not None and not handled_as_natural_message:
-            error = _validate_and_store(next_field, last_user, tr)
-            if error:
-                if next_field == "destination":
-                    messages.append({"role": "assistant", "content": _ask_for_field("destination", tr, messages, last_user)})
-                else:
-                    messages.append({"role": "assistant", "content": error})
-                state["messages"] = messages
-                state["travel_request"] = tr
-                return state
-            next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
-        elif next_field is None and not handled_as_natural_message:
-            # All fields filled — this message is the yes/no confirmation
-            if last_user.lower() in ("yes", "y", "confirm", "ok"):
-                return _build_confirmed_request(state, messages, tr)
-            elif last_user.lower() in ("no", "n"):
-                tr = {}
-                messages.append({"role": "assistant", "content": _ask_for_field("destination", {}, messages, last_user)})
-                state["messages"] = messages
-                state["travel_request"] = tr
-                state["phase"] = "onboard"
-                return state
-            else:
-                messages.append({"role": "assistant", "content": "I have the main trip details ready. Should I start planning this itinerary now? Reply yes to continue or no to start over."})
-                state["messages"] = messages
-                state["travel_request"] = tr
-                state["phase"] = "onboard"
-                return state
+    agent_status = str(llm_response.get("agent_status", "COLLECTING")).strip().upper()
+    if agent_status not in {"COLLECTING", "READY_TO_PROPOSE", "APPROVED"}:
+        agent_status = "COLLECTING"
 
-    if next_field is not None:
-        messages.append({"role": "assistant", "content": _ask_for_field(next_field, tr, messages, last_user)})
-    else:
-        if last_user is not None:
-            messages.append({"role": "assistant", "content": _summary_text(tr)})
+    response_to_user = str(llm_response.get("response_to_user", "")).strip()
+    if response_to_user:
+        messages.append({"role": "assistant", "content": response_to_user})
+
+    if agent_status == "APPROVED":
+        confirmed, error = _build_confirmed_request_from_preferences(state, travel_request)
+        if confirmed is not None:
+            state["confirmed_request"] = confirmed
+            state["phase"] = "plan"
         else:
-            return _build_confirmed_request(state, messages, tr)
+            agent_status = "COLLECTING"
+            state["confirmed_request"] = None
+            state["phase"] = "onboard"
+            messages.append({
+                "role": "assistant",
+                "content": (
+                    "I am almost ready, but I still need valid trip details before planning. "
+                    f"{error}."
+                ),
+            })
+    else:
+        state["phase"] = "onboard"
 
     state["messages"] = messages
-    state["travel_request"] = tr
-    state["phase"] = "onboard"
+    state["travel_request"] = travel_request
+    state["agent_status"] = agent_status
     return state
 
 
@@ -284,7 +179,10 @@ def plan_node(state: AgentState) -> AgentState:
     reasoning_log = list(state.get("reasoning_log", []))
 
     if not confirmed:
-        messages.append({"role": "assistant", "content": "No confirmed request. Please complete onboarding first."})
+        messages.append({
+            "role": "assistant",
+            "content": "No confirmed request. Please complete onboarding first.",
+        })
         state["messages"] = messages
         return state
 
@@ -293,12 +191,14 @@ def plan_node(state: AgentState) -> AgentState:
         state["itineraries"] = itineraries
         state["reasoning_log"] = reasoning_log
         state["phase"] = "rank"
+
         msg = (
             f"Found {len(itineraries)} itinerary option(s). Analyzing..."
-            if itineraries else
-            "No itineraries found. Please try a higher budget."
+            if itineraries
+            else "No itineraries found. Please try a higher budget."
         )
         messages.append({"role": "assistant", "content": msg})
+
     except ConnectionError as e:
         messages.append({"role": "assistant", "content": str(e)})
         state["phase"] = "onboard"
@@ -325,6 +225,7 @@ def rank_node(state: AgentState) -> AgentState:
         for it in itineraries
     ]
     normalized = normalize_scores(raw_scores)
+
     for it, score in zip(itineraries, normalized):
         it.match_score = score
 
@@ -344,24 +245,30 @@ def rank_node(state: AgentState) -> AgentState:
     state["phase"] = "rank"
 
     ai_explanation = build_trip_explanation(confirmed, itineraries)
+
     options_text = ""
     if ai_explanation:
         options_text += f"{ai_explanation}\n\n"
-        reasoning_log.append("OpenRouter generated a grounded customer-facing answer from mock itinerary data.")
+        reasoning_log.append(
+            "OpenRouter generated a grounded customer-facing answer from mock itinerary data."
+        )
 
     options_text += "Here are the mock-data options I found:\n\n"
+
     for i, it in enumerate(itineraries):
         activities = ", ".join(a.name for a in it.activities) or "None"
         fallback = " [Exceeds Budget]" if it.is_partial_fallback else ""
         options_text += (
             f"Option {i+1} (Match: {it.match_score:.0%}){fallback}\n"
             f"  Flight: {it.flight.airline} — ${it.flight.price:.2f}\n"
-            f"  Hotel:  {it.hotel.name} ({it.hotel.stars}★) — ${it.hotel.price_per_night:.2f}/night\n"
+            f"  Hotel:  {it.hotel.name} ({it.hotel.stars}★) — "
+            f"${it.hotel.price_per_night:.2f}/night\n"
             f"  Activities: {activities}\n"
             f"  Total: ${it.total_cost:.2f}\n\n"
         )
 
     messages.append({"role": "assistant", "content": options_text})
+
     state["messages"] = messages
     state["reasoning_log"] = reasoning_log
     return state
@@ -369,7 +276,6 @@ def rank_node(state: AgentState) -> AgentState:
 
 # ── Passenger / payment collection ───────────────────────────────────────────
 
-# Each tuple: (field_name, state_dict_key, question_prompt)
 _COLLECT_FIELDS: list[tuple[str, str, str]] = [
     ("full_name",       "passenger_info", "Passenger's full legal name:"),
     ("passport_number", "passenger_info", "Passport number:"),
@@ -390,12 +296,15 @@ def _validate_collect_field(field: str, value: str) -> Optional[str]:
             date.fromisoformat(value)
         except ValueError:
             return "Please enter a valid date (YYYY-MM-DD)."
+
     elif field == "card_last4":
         if not value.isdigit() or len(value) != 4:
             return "Please enter exactly 4 digits."
+
     elif field == "card_expiry":
         if not re.fullmatch(r"(0[1-9]|1[0-2])/\d{2}", value):
             return "Please enter expiry as MM/YY (e.g. 06/28)."
+
     return None
 
 
@@ -404,10 +313,16 @@ def _next_collect_field(
     contact_info: dict,
     payment_info: dict,
 ) -> Optional[tuple[str, str, str]]:
-    stores = {"passenger_info": passenger_info, "contact_info": contact_info, "payment_info": payment_info}
+    stores = {
+        "passenger_info": passenger_info,
+        "contact_info": contact_info,
+        "payment_info": payment_info,
+    }
+
     for field, key, prompt in _COLLECT_FIELDS:
         if field not in stores[key]:
             return field, key, prompt
+
     return None
 
 
@@ -416,25 +331,25 @@ def collect_passenger_node(state: AgentState) -> AgentState:
     Dynamic collection of passenger, contact, and payment details.
 
     When OpenRouter is enabled: calls extract_passenger_fields on the user's
-    last message — any fields mentioned naturally are extracted and stored in
+    last message. Any fields mentioned naturally are extracted and stored in
     one turn. Then calls generate_conversational_prompt to ask for whatever
     is still missing in a single friendly sentence.
 
-    When OpenRouter is disabled (no API key): falls back to the original
-    sequential one-field-per-turn behaviour with rule-based prompts.
+    When OpenRouter is disabled: falls back to the sequential one-field-per-turn
+    behaviour with rule-based prompts.
 
-    Advances to phase 'confirm' (→ critic node) when all 9 fields are filled.
+    Advances to phase 'confirm' when all fields are filled.
     """
     messages       = list(state.get("messages", []))
     passenger_info = dict(state.get("passenger_info", {}))
-    contact_info   = dict(state.get("contact_info",   {}))
-    payment_info   = dict(state.get("payment_info",   {}))
-    reasoning_log  = list(state.get("reasoning_log",  []))
+    contact_info   = dict(state.get("contact_info", {}))
+    payment_info   = dict(state.get("payment_info", {}))
+    reasoning_log  = list(state.get("reasoning_log", []))
 
     stores = {
         "passenger_info": passenger_info,
-        "contact_info":   contact_info,
-        "payment_info":   payment_info,
+        "contact_info": contact_info,
+        "payment_info": payment_info,
     }
 
     last_user: Optional[str] = None
@@ -445,40 +360,48 @@ def collect_passenger_node(state: AgentState) -> AgentState:
         extracted = extract_passenger_fields(last_user)
 
         if extracted:
-            # LLM path: store every valid extracted field in one pass
             stored: list[str] = []
+
             for field, key, _ in _COLLECT_FIELDS:
                 if field not in extracted or field in stores[key]:
                     continue
+
                 value = str(extracted[field]).strip()
+
                 if not _validate_collect_field(field, value):
                     stores[key][field] = value
                     stored.append(field)
+
             if stored:
-                reasoning_log.append(f"LLM extracted passenger fields: {', '.join(stored)}")
+                reasoning_log.append(
+                    f"LLM extracted passenger fields: {', '.join(stored)}"
+                )
+
         else:
-            # Sequential fallback: raw answer goes to the next pending field
             pending = _next_collect_field(passenger_info, contact_info, payment_info)
+
             if pending is not None:
                 field, key, _ = pending
                 error = _validate_collect_field(field, last_user)
+
                 if error:
                     messages.append({"role": "assistant", "content": error})
                     state.update({
-                        "messages":       messages,
+                        "messages": messages,
                         "passenger_info": passenger_info,
-                        "contact_info":   contact_info,
-                        "payment_info":   payment_info,
+                        "contact_info": contact_info,
+                        "payment_info": payment_info,
                     })
                     return state
+
                 stores[key][field] = last_user
 
     next_pending = _next_collect_field(passenger_info, contact_info, payment_info)
 
     if next_pending is None:
-        # All 9 fields collected — hand off to critic
         reasoning_log.append("All passenger and payment details collected.")
         state["phase"] = "confirm"
+
         messages.append({
             "role": "assistant",
             "content": (
@@ -494,20 +417,26 @@ def collect_passenger_node(state: AgentState) -> AgentState:
                 "Click **Confirm & Book** to finalize."
             ),
         })
+
     else:
-        # Ask for whatever is still missing
-        missing_names = [f for f, k, _ in _COLLECT_FIELDS if f not in stores[k]]
+        missing_names = [
+            f for f, k, _ in _COLLECT_FIELDS
+            if f not in stores[k]
+        ]
+
         question = generate_conversational_prompt(missing_names, messages)
+
         if question is None:
-            _, _, question = next_pending   # sequential fallback
+            _, _, question = next_pending
+
         messages.append({"role": "assistant", "content": question})
 
     state.update({
-        "messages":       messages,
+        "messages": messages,
         "passenger_info": passenger_info,
-        "contact_info":   contact_info,
-        "payment_info":   payment_info,
-        "reasoning_log":  reasoning_log,
+        "contact_info": contact_info,
+        "payment_info": payment_info,
+        "reasoning_log": reasoning_log,
     })
     return state
 
@@ -516,27 +445,29 @@ def collect_passenger_node(state: AgentState) -> AgentState:
 
 def critic_validation_node(state: AgentState) -> AgentState:
     """
-    Re-validates all 9 collected fields after collection is complete.
-    Any field that fails validation is removed and the phase is reset to
-    'collect' so the user is asked only for those failing fields again.
-    If everything checks out the phase stays 'confirm'.
+    Re-validates all collected fields after collection is complete.
+
+    Any field that fails validation is removed and phase is reset to 'collect'
+    so the user is asked only for the failing fields again.
     """
     messages       = list(state.get("messages", []))
     passenger_info = dict(state.get("passenger_info", {}))
-    contact_info   = dict(state.get("contact_info",   {}))
-    payment_info   = dict(state.get("payment_info",   {}))
-    reasoning_log  = list(state.get("reasoning_log",  []))
+    contact_info   = dict(state.get("contact_info", {}))
+    payment_info   = dict(state.get("payment_info", {}))
+    reasoning_log  = list(state.get("reasoning_log", []))
 
     stores = {
         "passenger_info": passenger_info,
-        "contact_info":   contact_info,
-        "payment_info":   payment_info,
+        "contact_info": contact_info,
+        "payment_info": payment_info,
     }
 
-    failures: list[tuple[str, str]] = []  # (field_name, error_message)
+    failures: list[tuple[str, str]] = []
+
     for field, key, _ in _COLLECT_FIELDS:
         value = stores[key].get(field, "")
         error = _validate_collect_field(field, str(value))
+
         if error:
             failures.append((field, error))
             stores[key].pop(field, None)
@@ -544,6 +475,7 @@ def critic_validation_node(state: AgentState) -> AgentState:
     if failures:
         detail = "; ".join(f"{f}: {e}" for f, e in failures)
         reasoning_log.append(f"Critic rejected fields: {detail}")
+
         messages.append({
             "role": "assistant",
             "content": (
@@ -551,16 +483,20 @@ def critic_validation_node(state: AgentState) -> AgentState:
                 + "\n".join(f"- **{f}**: {e}" for f, e in failures)
             ),
         })
+
         state["phase"] = "collect"
+
     else:
-        reasoning_log.append("Critic validation passed — all passenger/payment fields valid.")
+        reasoning_log.append(
+            "Critic validation passed — all passenger/payment fields valid."
+        )
 
     state.update({
-        "messages":       messages,
+        "messages": messages,
         "passenger_info": passenger_info,
-        "contact_info":   contact_info,
-        "payment_info":   payment_info,
-        "reasoning_log":  reasoning_log,
+        "contact_info": contact_info,
+        "payment_info": payment_info,
+        "reasoning_log": reasoning_log,
     })
     return state
 
@@ -569,14 +505,14 @@ def critic_validation_node(state: AgentState) -> AgentState:
 
 def confirm_node(state: AgentState) -> AgentState:
     """
-    Calls the mock server to POST-book each component (flight, hotel, activities),
-    assembles a BookingConfirmation with the server-issued IDs, and sets phase='done'.
+    Calls the mock server to POST-book each component, assembles a
+    BookingConfirmation with the server-issued IDs, and sets phase='done'.
     """
     messages       = list(state.get("messages", []))
     selected       = state.get("selected_itinerary")
     passenger_info = state.get("passenger_info", {})
-    contact_info   = state.get("contact_info",   {})
-    payment_info   = state.get("payment_info",   {})
+    contact_info   = state.get("contact_info", {})
+    payment_info   = state.get("payment_info", {})
     reasoning_log  = list(state.get("reasoning_log", []))
 
     if not selected:
@@ -591,22 +527,43 @@ def confirm_node(state: AgentState) -> AgentState:
             passport_number=passenger_info["passport_number"],
             date_of_birth=date.fromisoformat(passenger_info["date_of_birth"]),
         )
+
         contact = ContactInfo(**contact_info)
         payment = PaymentInfo(**payment_info)
-        client  = DataClient()
+        client = DataClient()
 
-        reasoning_log.append(f"Booking {selected.flight.airline} flight ({selected.flight.id})...")
-        flight_bid = client.book_flight(selected.flight.id, passenger, contact, payment)
+        reasoning_log.append(
+            f"Booking {selected.flight.airline} flight ({selected.flight.id})..."
+        )
+        flight_bid = client.book_flight(
+            selected.flight.id,
+            passenger,
+            contact,
+            payment,
+        )
         reasoning_log.append(f"Flight confirmed → {flight_bid}")
 
-        reasoning_log.append(f"Booking {selected.hotel.name} ({selected.hotel.id})...")
-        hotel_bid = client.book_hotel(selected.hotel.id, passenger, contact, payment)
+        reasoning_log.append(
+            f"Booking {selected.hotel.name} ({selected.hotel.id})..."
+        )
+        hotel_bid = client.book_hotel(
+            selected.hotel.id,
+            passenger,
+            contact,
+            payment,
+        )
         reasoning_log.append(f"Hotel confirmed → {hotel_bid}")
 
         activity_bids: list[str] = []
+
         for activity in selected.activities:
             reasoning_log.append(f"Booking activity: {activity.name}...")
-            bid = client.book_activity(activity.id, passenger, contact, payment)
+            bid = client.book_activity(
+                activity.id,
+                passenger,
+                contact,
+                payment,
+            )
             activity_bids.append(bid)
             reasoning_log.append(f"Activity confirmed → {bid}")
 
@@ -618,29 +575,38 @@ def confirm_node(state: AgentState) -> AgentState:
             passenger=passenger,
             contact=contact,
         )
-        state["booking"] = booking
-        state["phase"]   = "done"
 
-        activity_lines = "\n".join(f"  - Activity: {bid}" for bid in activity_bids)
+        state["booking"] = booking
+        state["phase"] = "done"
+
+        activity_lines = "\n".join(
+            f"  - Activity: {bid}" for bid in activity_bids
+        )
+
         messages.append({
             "role": "assistant",
             "content": (
-                f"Your trip is confirmed!\n\n"
+                "Your trip is confirmed!\n\n"
                 f"  - Flight: {flight_bid}\n"
                 f"  - Hotel:  {hotel_bid}\n"
                 f"{activity_lines}\n\n"
-                f"Total charged: ${selected.total_cost:.2f} to card ending in {payment_info.get('card_last4', '????')}. "
+                f"Total charged: ${selected.total_cost:.2f} "
+                f"to card ending in {payment_info.get('card_last4', '????')}. "
                 f"Safe travels, {passenger_info.get('full_name', 'traveller')}!"
             ),
         })
-        reasoning_log.append(f"All bookings confirmed. Master reference: {flight_bid}.")
+
+        reasoning_log.append(
+            f"All bookings confirmed. Master reference: {flight_bid}."
+        )
 
     except ConnectionError as e:
         messages.append({"role": "assistant", "content": str(e)})
+
     except Exception as e:
         messages.append({"role": "assistant", "content": f"Booking error: {e}"})
 
-    state["messages"]      = messages
+    state["messages"] = messages
     state["reasoning_log"] = reasoning_log
     return state
 
@@ -649,59 +615,73 @@ def confirm_node(state: AgentState) -> AgentState:
 
 def build_graph():
     """
-    Graph entry point is a router node that dispatches by phase so that
-    every graph.invoke() resumes at exactly the right node rather than
-    always re-entering onboarding.
+    Graph entry point is a router node that dispatches by phase.
 
     Flow:
-      onboard  → plan → rank → END  (wait for user to select option)
-      collect  → END               (wait for next passenger-detail answer)
-      confirm  → END               (booking complete)
+      onboard → plan → rank → END
+      collect → critic → END
+      confirm → END
     """
     g = StateGraph(AgentState)
 
-    g.add_node("router",            lambda s: s)  # pass-through dispatcher
-    g.add_node("onboard",           onboard_node)
-    g.add_node("plan",              plan_node)
-    g.add_node("rank",              rank_node)
+    g.add_node("router", lambda s: s)
+    g.add_node("onboard", onboard_node)
+    g.add_node("plan", plan_node)
+    g.add_node("rank", rank_node)
     g.add_node("collect_passenger", collect_passenger_node)
-    g.add_node("critic",            critic_validation_node)
-    g.add_node("confirm",           confirm_node)
+    g.add_node("critic", critic_validation_node)
+    g.add_node("confirm", confirm_node)
 
     g.set_entry_point("router")
 
-    # Route to the correct node based on current phase
     def _dispatch(s: AgentState) -> str:
         phase = s.get("phase", "onboard")
+
         if phase == "collect":
             return "collect"
         if phase == "confirm":
             return "confirm"
+        if phase == "plan":
+            return "plan"
+        if phase in {"rank", "done"}:
+            return END
+
         return "onboard"
 
     g.add_conditional_edges(
         "router",
         _dispatch,
-        {"collect": "collect_passenger", "confirm": "confirm", "onboard": "onboard"},
+        {
+            "collect": "collect_passenger",
+            "confirm": "confirm",
+            "plan": "plan",
+            "onboard": "onboard",
+            END: END,
+        },
     )
 
-    # After onboard: proceed to plan only when user confirmed the request
     g.add_conditional_edges(
         "onboard",
-        lambda s: "plan" if s.get("confirmed_request") else END,
-        {"plan": "plan", END: END},
+        lambda s: "plan" if s.get("agent_status") == "APPROVED" else END,
+        {
+            "plan": "plan",
+            END: END,
+        },
     )
 
     g.add_edge("plan", "rank")
     g.add_edge("rank", END)
 
-    # After collection: run critic only when all 9 fields are done (phase=="confirm")
     g.add_conditional_edges(
         "collect_passenger",
         lambda s: "critic" if s.get("phase") == "confirm" else END,
-        {"critic": "critic", END: END},
+        {
+            "critic": "critic",
+            END: END,
+        },
     )
-    g.add_edge("critic",  END)
+
+    g.add_edge("critic", END)
     g.add_edge("confirm", END)
 
     return g.compile()

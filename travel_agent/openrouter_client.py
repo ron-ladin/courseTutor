@@ -36,6 +36,134 @@ def openrouter_enabled() -> bool:
     )
 
 
+def generate_autonomous_response(
+    chat_history: list[dict],
+    current_preferences: dict,
+) -> dict[str, Any]:
+    """
+    Autonomous onboarding brain for the travel agent.
+
+    The model owns the conversation strategy and must return structured JSON:
+      - extracted_data: the accumulated travel preferences understood so far
+      - agent_status: COLLECTING | READY_TO_PROPOSE | APPROVED
+      - response_to_user: the next natural-language assistant message
+
+    The deterministic planner still owns actual itinerary construction after
+    the user explicitly approves planning.
+    """
+    supported_destinations = ", ".join(STATIC_DATA.keys())
+    safe_preferences = current_preferences or {}
+
+    if not openrouter_enabled():
+        return {
+            "extracted_data": safe_preferences,
+            "agent_status": "COLLECTING",
+            "response_to_user": (
+                "I can help plan your trip, but the autonomous AI brain is not configured yet. "
+                "Please set OPENROUTER_ENABLED=true and OPENROUTER_API_KEY in your local .env file."
+            ),
+        }
+
+    system_prompt = (
+        "You are SkySwift AI, an autonomous travel agent. "
+        "Your goal is to collect enough information to plan a trip: destination, exact departure_date, "
+        "exact return_date, and total budget in USD. If the user is flexible about dates, propose concrete "
+        "YYYY-MM-DD dates and ask them to confirm. You may also capture travel_style when the user mentions it.\n\n"
+        "Supported demo destinations are: " + supported_destinations + ". "
+        "If the user asks for an unsupported destination, explain that this demo currently supports only those places.\n\n"
+        "Always return ONLY valid JSON with exactly these three top-level keys:\n"
+        "1. extracted_data: an object containing all known trip fields so far. Use keys: "
+        "destination, departure_date, return_date, budget, travel_style. Dates must be YYYY-MM-DD. "
+        "budget must be numeric. travel_style should be an array of short tags when present.\n"
+        "2. agent_status: exactly one of COLLECTING, READY_TO_PROPOSE, APPROVED.\n"
+        "3. response_to_user: the friendly natural-language response to show the user.\n\n"
+        "Status rules:\n"
+        "- COLLECTING: any required information is missing, unclear, invalid, or the user is still deciding.\n"
+        "- READY_TO_PROPOSE: destination, departure_date, return_date, and budget are all present and valid; "
+        "ask the user if you should start planning.\n"
+        "- APPROVED: use only when the required fields are present and the latest user message explicitly approves "
+        "planning, for example yes, go ahead, start planning, confirm, or sounds good.\n\n"
+        "Never claim that flights, hotels, prices, or availability have been searched before the planner runs. "
+        "Never invent booking references."
+    )
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "system",
+            "content": (
+                "Current accumulated preferences, which you may correct or extend from the conversation: "
+                f"{json.dumps(safe_preferences, ensure_ascii=False, default=str)}"
+            ),
+        },
+    ]
+
+    added_history = False
+    for msg in chat_history[-12:]:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str):
+            messages.append({"role": role, "content": content})
+            added_history = True
+
+    if not added_history:
+        messages.append({
+            "role": "user",
+            "content": "Start the travel-planning conversation and ask for the first useful detail.",
+        })
+
+    try:
+        payload: dict[str, Any] = {
+            "model": os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL),
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 420,
+            "response_format": {"type": "json_object"},
+        }
+        response = httpx.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:8501",
+                "X-Title": "SkySwift Travel Planning Agent",
+            },
+            json=payload,
+            timeout=20,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"].strip()
+        parsed = json.loads(content)
+        if not isinstance(parsed, dict):
+            raise ValueError("OpenRouter returned non-object JSON")
+
+        extracted = parsed.get("extracted_data")
+        status = str(parsed.get("agent_status", "COLLECTING")).strip().upper()
+        response_text = str(parsed.get("response_to_user", "")).strip()
+
+        if not isinstance(extracted, dict):
+            extracted = {}
+        if status not in {"COLLECTING", "READY_TO_PROPOSE", "APPROVED"}:
+            status = "COLLECTING"
+        if not response_text:
+            response_text = "Tell me where you would like to travel, your dates, and your budget."
+
+        return {
+            "extracted_data": extracted,
+            "agent_status": status,
+            "response_to_user": response_text,
+        }
+    except Exception:
+        return {
+            "extracted_data": safe_preferences,
+            "agent_status": "COLLECTING",
+            "response_to_user": (
+                "I had trouble reading the trip details as structured data. "
+                "Please tell me your destination, exact dates, and total budget in one message."
+            ),
+        }
+
+
 def build_trip_explanation(
     request: TravelRequest,
     itineraries: list[Itinerary],
