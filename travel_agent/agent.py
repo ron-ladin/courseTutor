@@ -188,7 +188,226 @@ def _build_confirmed_request_from_preferences(
         return None, "Missing trip details: " + ", ".join(missing)
 
     try:
-        tr = _normalise_trip_dates(tr)
+        resp = _llm.messages.create(
+            model=_MODEL,
+            max_tokens=160,
+            messages=[{"role": "user", "content": "\n".join(lines)}],
+        )
+        return next((b.text for b in resp.content if b.type == "text"), "").strip()
+    except Exception:
+        return ""
+
+
+# ── Onboarding (rule-based fallback) ──────────────────────────────────────────
+
+_FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
+
+_VALID_DESTINATIONS = ["Tokyo", "Paris", "Bali", "New York"]
+_VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
+
+_MISSING_QUESTIONS = {
+    "destination":    f"Where would you like to go? ({', '.join(_VALID_DESTINATIONS)})",
+    "departure_date": "What's your departure date? (YYYY-MM-DD)",
+    "return_date":    "What's your return date? (YYYY-MM-DD)",
+    "budget":         "What's your total budget in USD?",
+    "travel_style":   f"What travel style suits you? ({', '.join(_VALID_STYLES)})",
+}
+
+_ACK = {
+    "destination":    lambda tr: f"{tr['destination']} — great choice! ",
+    "departure_date": lambda tr: f"Departing {tr['departure_date']}. ",
+    "return_date":    lambda tr: f"Returning {tr['return_date']}. ",
+    "budget":         lambda tr: f"Budget ${float(tr['budget']):.0f}. ",
+    "travel_style":   lambda tr: f"Style: {tr['travel_style']}. ",
+}
+
+# Month-name → number for natural date parsing
+_MONTHS = {
+    "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
+    "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
+    "jan":1,"feb":2,"mar":3,"apr":4,"jun":6,"jul":7,"aug":8,
+    "sep":9,"oct":10,"nov":11,"dec":12,
+}
+
+
+def _extract_from_message(text: str, tr: dict) -> list[str]:
+    """
+    Parse a free-form message and store every recognisable travel detail in tr.
+    Returns list of field names that were newly filled.
+    """
+    found: list[str] = []
+    low = text.lower()
+
+    # ── destination ──────────────────────────────────────────────────────────
+    if "destination" not in tr:
+        for dest in _VALID_DESTINATIONS:
+            if dest.lower() in low:
+                tr["destination"] = dest
+                found.append("destination")
+                break
+
+    # ── travel style ─────────────────────────────────────────────────────────
+    if "travel_style" not in tr:
+        styles = [s for s in _VALID_STYLES if re.search(rf"\b{s}\b", low)]
+        if styles:
+            tr["travel_style"] = ", ".join(styles)
+            found.append("travel_style")
+
+    # ── budget ────────────────────────────────────────────────────────────────
+    if "budget" not in tr:
+        # matches "$2,000", "2000 usd", "2000$", "budget 2000", "2k"
+        m = re.search(
+            r'\$\s*([\d,]+(?:\.\d+)?)[k]?'
+            r'|([\d,]+(?:\.\d+)?)\s*[k]?\s*(?:usd|dollars?|\$)',
+            low
+        )
+        if not m:
+            m = re.search(r'budget\D{0,6}([\d,]+)', low)
+        if m:
+            raw = next(g for g in m.groups() if g).replace(",", "")
+            if raw.endswith("k"):
+                raw = raw[:-1]
+                mult = 1000
+            else:
+                mult = 1000 if re.search(r'\d\s*k\b', low) else 1
+            try:
+                b = float(raw) * mult
+                if b > 0:
+                    tr["budget"] = b
+                    found.append("budget")
+            except ValueError:
+                pass
+
+    # ── dates ─────────────────────────────────────────────────────────────────
+    # ISO format: 2025-06-01
+    iso_dates = re.findall(r'\b(20\d\d-\d{1,2}-\d{1,2})\b', text)
+    # "June 1" / "1 June" / "June 1 2025"
+    nat_dates = re.findall(
+        r'\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?'
+        r'|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+        r'\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:,?\s*(20\d\d))?'
+        r'|(\d{1,2})(?:st|nd|rd|th)?\s+'
+        r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?'
+        r'|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+        r'(?:\s*,?\s*(20\d\d))?)\b',
+        low,
+    )
+
+    candidate_dates: list[date] = []
+
+    for d_str in iso_dates:
+        try:
+            candidate_dates.append(date.fromisoformat(d_str))
+        except ValueError:
+            pass
+
+    for match in nat_dates:
+        # match is a tuple from the alternation groups — try to parse whatever we got
+        full = match[0]
+        for mn, num in _MONTHS.items():
+            if mn in full:
+                day_m = re.search(r'\b(\d{1,2})\b', full)
+                year_m = re.search(r'\b(20\d\d)\b', full)
+                if day_m:
+                    yr = int(year_m.group(1)) if year_m else date.today().year
+                    try:
+                        candidate_dates.append(date(yr, num, int(day_m.group(1))))
+                    except ValueError:
+                        pass
+                break
+
+    candidate_dates.sort()
+    for d in candidate_dates:
+        if "departure_date" not in tr:
+            tr["departure_date"] = d.isoformat()
+            found.append("departure_date")
+        elif "return_date" not in tr:
+            dep = date.fromisoformat(tr["departure_date"])
+            if d > dep:
+                tr["return_date"] = d.isoformat()
+                found.append("return_date")
+
+    return found
+
+
+def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
+    """Strict single-field validation used when the user answers a direct question."""
+    if field == "destination":
+        match = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
+        if not match:
+            return f"'{value.strip()}' isn't available. Choose from: {', '.join(_VALID_DESTINATIONS)}."
+        tr["destination"] = match
+
+    elif field == "travel_style":
+        styles = [s.strip().lower() for s in value.split(",") if s.strip()]
+        valid = [s for s in styles if s in _VALID_STYLES]
+        if not valid:
+            return f"Please choose at least one from: {', '.join(_VALID_STYLES)}."
+        tr["travel_style"] = ", ".join(valid)
+
+    elif field == "budget":
+        try:
+            b = float(value.replace("$", "").replace(",", ""))
+            if b <= 0:
+                return "Please enter a positive number for your budget."
+            tr["budget"] = b
+        except ValueError:
+            return "Please enter a valid number (e.g. 2000)."
+
+    elif field == "departure_date":
+        try:
+            date.fromisoformat(value.strip())
+            tr["departure_date"] = value.strip()
+        except ValueError:
+            return "Please enter a valid date in YYYY-MM-DD format."
+
+    elif field == "return_date":
+        try:
+            ret = date.fromisoformat(value.strip())
+            dep = date.fromisoformat(tr["departure_date"])
+            if ret <= dep:
+                return f"Return date must be after {tr['departure_date']}."
+            tr["return_date"] = value.strip()
+        except ValueError:
+            return "Please enter a valid date in YYYY-MM-DD format."
+
+    return None
+
+
+def _missing_fields_prompt(tr: dict) -> str:
+    """Build a single question asking only for the first missing field."""
+    missing = [f for f in _FIELD_ORDER if f not in tr]
+    if not missing:
+        return ""
+    return _MISSING_QUESTIONS[missing[0]]
+
+
+def _summary_text(tr: dict) -> str:
+    dep = date.fromisoformat(tr["departure_date"])
+    ret = date.fromisoformat(tr["return_date"])
+    nights = (ret - dep).days
+    nights_note = (
+        f" **⚠️ {nights} nights — is that right?**"
+        if nights > 14
+        else f" ({nights} nights)"
+    )
+    return (
+        f"Here is your trip summary:\n"
+        f"- Destination: {tr['destination']}\n"
+        f"- Dates: {tr['departure_date']} → {tr['return_date']}{nights_note}\n"
+        f"- Budget: ${float(tr['budget']):.0f}\n"
+        f"- Style: {tr['travel_style']}\n\n"
+        "Shall I proceed with planning? (yes / no)"
+    )
+
+
+def _build_confirmed_request(state: AgentState, messages: list, tr: dict) -> AgentState:
+    try:
+        style_raw = tr.get("travel_style", "")
+        travel_style = (
+            [t.strip() for t in style_raw.split(",") if t.strip()]
+            if isinstance(style_raw, str) else style_raw
+        )
         confirmed = TravelRequest(
             destination=str(tr["destination"]),
             departure_date=date.fromisoformat(str(tr["departure_date"]).strip()),
@@ -200,6 +419,113 @@ def _build_confirmed_request_from_preferences(
     except Exception as exc:
         return None, f"Validation error: {exc}"
 
+
+def _rule_based_onboard(state: AgentState) -> AgentState:
+    """
+    Smart rule-based onboarding — parses free-form messages to extract travel
+    details all at once. Falls back to direct field validation when needed.
+    Used when ANTHROPIC_API_KEY is absent.
+    """
+    messages = list(state.get("messages", []))
+    tr = dict(state.get("travel_request", {}))
+
+    last_user: Optional[str] = None
+    if messages and messages[-1].get("role") == "user":
+        last_user = messages[-1]["content"].strip()
+
+    all_filled = all(f in tr for f in _FIELD_ORDER)
+
+    # ── handle yes/no confirmation ────────────────────────────────────────────
+    if last_user is not None and all_filled:
+        if last_user.lower() in ("yes", "y", "confirm", "ok", "sure", "go", "go ahead", "proceed"):
+            return _build_confirmed_request(state, messages, tr)
+        elif last_user.lower() in ("no", "n", "restart", "start over"):
+            tr = {}
+            messages.append({
+                "role": "assistant",
+                "content": (
+                    "No problem! Tell me about your trip — destination, dates, "
+                    "budget, and what kind of experience you're after."
+                ),
+            })
+            state["messages"] = messages
+            state["travel_request"] = tr
+            state["phase"] = "onboard"
+            return state
+        else:
+            messages.append({"role": "assistant", "content": "Type **yes** to confirm or **no** to start over."})
+            state["messages"] = messages
+            state["phase"] = "onboard"
+            return state
+
+    # ── parse the user's message ──────────────────────────────────────────────
+    if last_user is not None:
+        # Try free-form extraction first
+        found = _extract_from_message(last_user, tr)
+
+        # If extraction missed the next expected field, try strict validation
+        if not found:
+            next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
+            if next_field:
+                error = _validate_and_store(next_field, last_user, tr)
+                if error:
+                    messages.append({"role": "assistant", "content": error})
+                    state["messages"] = messages
+                    state["travel_request"] = tr
+                    state["phase"] = "onboard"
+                    return state
+                found = [next_field]
+
+        if found:
+            ack = "".join(_ACK[f](tr) for f in found if f in _ACK).strip()
+            missing = _missing_fields_prompt(tr)
+            if not missing:
+                # All fields collected — show summary
+                reply = (ack + "\n\n" + _summary_text(tr)) if ack else _summary_text(tr)
+            else:
+                reply = (ack + "  " + missing) if ack else missing
+            messages.append({"role": "assistant", "content": reply})
+        else:
+            # Nothing recognised — echo-ask for the next missing piece
+            next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
+            if next_field:
+                messages.append({
+                    "role": "assistant",
+                    "content": f"I didn't quite catch that. {_MISSING_QUESTIONS[next_field]}",
+                })
+
+        state["messages"] = messages
+        state["travel_request"] = tr
+        state["phase"] = "onboard"
+        return state
+
+    # ── first load — no user message yet ─────────────────────────────────────
+    if all(f in tr for f in _FIELD_ORDER):
+        # All fields pre-filled (e.g. from a previous session) — auto-confirm
+        return _build_confirmed_request(state, messages, tr)
+
+    next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
+    if not messages and not tr:
+        # Completely fresh — welcoming open-ended greeting
+        messages.append({
+            "role": "assistant",
+            "content": (
+                "Hi! I'm your travel planning assistant. Tell me about your trip — "
+                "where you'd like to go, when, your budget, and the kind of experience "
+                "you're after. I'll pick up as many details as I can from your message.\n\n"
+                f"Available destinations: {', '.join(_VALID_DESTINATIONS)}"
+            ),
+        })
+    elif next_field:
+        messages.append({"role": "assistant", "content": _MISSING_QUESTIONS[next_field]})
+
+    state["messages"] = messages
+    state["travel_request"] = tr
+    state["phase"] = "onboard"
+    return state
+
+
+# ── Onboarding (LLM-powered) ───────────────────────────────────────────────────
 
 def onboard_node(state: AgentState) -> AgentState:
     """
