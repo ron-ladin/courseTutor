@@ -42,6 +42,7 @@ def _empty_state() -> AgentState:
         "reasoning_log": [],
         "backtrack_count": 0,
         "phase": "onboard",
+        "agent_status": "COLLECTING",
         "passenger_info": {},
         "contact_info": {},
         "payment_info": {},
@@ -435,7 +436,7 @@ if state["phase"] == "rank":
             _render_trip_card(i, itin)
             if st.button(f"Select option {i + 1}", key=f"select_{i}", use_container_width=True):
                 state["selected_itinerary"] = itin
-                state["phase"] = "confirm"
+                state["phase"] = "collect"
                 new_state = graph.invoke(state)
                 st.session_state.state = new_state
                 st.rerun()

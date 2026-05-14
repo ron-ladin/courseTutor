@@ -639,10 +639,13 @@ def build_graph():
 
         if phase == "collect":
             return "collect"
+
         if phase == "confirm":
             return "confirm"
+
         if phase == "plan":
             return "plan"
+
         if phase in {"rank", "done"}:
             return END
 
