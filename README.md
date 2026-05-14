@@ -43,12 +43,12 @@ API for tests and demos.
 
 ## Supported Demo Destinations
 
-The embedded catalog includes both cities and country-level destinations:
+The embedded catalog uses city destinations only:
 
 ```text
 Tokyo, Paris, Bali, New York,
-Japan, France, Italy, Greece, Thailand,
-Spain, United Kingdom, Mexico, Israel
+Kyoto, Nice, Rome, Athens, Bangkok,
+Barcelona, London, Mexico City, Tel Aviv
 ```
 
 ## Setup

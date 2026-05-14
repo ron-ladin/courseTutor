@@ -366,4 +366,29 @@ def _extend_catalog() -> None:
     })
 
 
+def _rename_country_catalog_to_cities() -> None:
+    """Keep the richer catalog, but expose destinations as cities only."""
+    country_to_city = {
+        "Japan": "Kyoto",
+        "France": "Nice",
+        "Italy": "Rome",
+        "Greece": "Athens",
+        "Thailand": "Bangkok",
+        "Spain": "Barcelona",
+        "United Kingdom": "London",
+        "Mexico": "Mexico City",
+        "Israel": "Tel Aviv",
+    }
+
+    for country, city in country_to_city.items():
+        data = STATIC_DATA.pop(country, None)
+        if data is None:
+            continue
+        for category in ("flights", "hotels", "activities"):
+            for item in data.get(category, []):
+                item.destination = city
+        STATIC_DATA[city] = data
+
+
 _extend_catalog()
+_rename_country_catalog_to_cities()

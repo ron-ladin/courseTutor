@@ -7,13 +7,37 @@ from hypothesis import given, strategies as st
 try:
     from travel_agent.models import TravelRequest, Itinerary, Flight, Hotel, Activity, BookingConfirmation
     from travel_agent.agent import (
-        AgentState, onboard_node, plan_node, rank_node, confirm_node, build_graph
+        AgentState, onboard_node, plan_node, rank_node, confirm_node, build_graph,
+        _normalise_date_value, _normalise_trip_dates,
     )
 except ImportError:
     from models import TravelRequest, Itinerary, Flight, Hotel, Activity, BookingConfirmation
     from agent import (
-        AgentState, onboard_node, plan_node, rank_node, confirm_node, build_graph
+        AgentState, onboard_node, plan_node, rank_node, confirm_node, build_graph,
+        _normalise_date_value, _normalise_trip_dates,
     )
+
+
+# ============================================================================
+# Natural date parsing
+# ============================================================================
+
+def test_natural_date_formats_are_normalised():
+    assert _normalise_date_value("2026-8-15") == "2026-08-15"
+    assert _normalise_date_value("15/8/26") == "2026-08-15"
+    assert _normalise_date_value("25.6.2026") == "2026-06-25"
+    assert _normalise_date_value("April 26", fallback_year=2026) == "2026-04-26"
+    assert _normalise_date_value("26 April 2026") == "2026-04-26"
+
+
+def test_trip_date_normalisation_uses_departure_year_for_return():
+    tr = _normalise_trip_dates({
+        "departure_date": "15/8/26",
+        "return_date": "20/8",
+    })
+
+    assert tr["departure_date"] == "2026-08-15"
+    assert tr["return_date"] == "2026-08-20"
 
 
 # ============================================================================

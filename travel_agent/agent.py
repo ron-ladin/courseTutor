@@ -51,6 +51,85 @@ class AgentState(TypedDict):
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
 _TRAVEL_FIELDS = {"destination", "departure_date", "return_date", "budget", "travel_style"}
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
+def _coerce_year(year: str | int | None, fallback_year: int | None = None) -> int:
+    if year is None:
+        return fallback_year or date.today().year
+    year_int = int(year)
+    if year_int < 100:
+        return 2000 + year_int
+    return year_int
+
+
+def _format_date(year: int, month: int, day: int) -> str:
+    return date(year, month, day).isoformat()
+
+
+def _normalise_date_value(value: Any, fallback_year: int | None = None) -> str:
+    """
+    Convert common customer date formats to YYYY-MM-DD.
+
+    Supported examples:
+      2026-8-15, 15/8/26, 25.6.2026, April 26, Apr 26 2026, 26 April 2026.
+    """
+    raw = str(value).strip()
+    if not raw:
+        raise ValueError("empty date")
+
+    iso_match = re.fullmatch(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", raw)
+    if iso_match:
+        year, month, day = iso_match.groups()
+        return _format_date(int(year), int(month), int(day))
+
+    numeric_match = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})(?:[-/.](\d{2,4}))?", raw)
+    if numeric_match:
+        day, month, year = numeric_match.groups()
+        return _format_date(_coerce_year(year, fallback_year), int(month), int(day))
+
+    lowered = raw.lower().replace(",", " ")
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+
+    month_first = re.fullmatch(r"([a-z]+)\s+(\d{1,2})(?:\s+(\d{2,4}))?", lowered)
+    if month_first and month_first.group(1) in _MONTHS:
+        month_name, day, year = month_first.groups()
+        return _format_date(_coerce_year(year, fallback_year), _MONTHS[month_name], int(day))
+
+    day_first = re.fullmatch(r"(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?", lowered)
+    if day_first and day_first.group(2) in _MONTHS:
+        day, month_name, year = day_first.groups()
+        return _format_date(_coerce_year(year, fallback_year), _MONTHS[month_name], int(day))
+
+    raise ValueError(f"unsupported date format: {raw}")
+
+
+def _normalise_trip_dates(tr: dict) -> dict:
+    normalised = dict(tr)
+    departure_year: int | None = None
+
+    if "departure_date" in normalised:
+        departure = _normalise_date_value(normalised["departure_date"])
+        normalised["departure_date"] = departure
+        departure_year = date.fromisoformat(departure).year
+
+    if "return_date" in normalised:
+        normalised["return_date"] = _normalise_date_value(normalised["return_date"], departure_year)
+
+    return normalised
 
 
 def _merge_extracted_preferences(current: dict, extracted: dict[str, Any]) -> dict:
@@ -62,6 +141,10 @@ def _merge_extracted_preferences(current: dict, extracted: dict[str, Any]) -> di
         if isinstance(value, str) and not value.strip():
             continue
         merged[key] = value
+    try:
+        merged = _normalise_trip_dates(merged)
+    except ValueError:
+        pass
     return merged
 
 
@@ -105,8 +188,9 @@ def _build_confirmed_request_from_preferences(
         return None, "Missing trip details: " + ", ".join(missing)
 
     try:
+        tr = _normalise_trip_dates(tr)
         confirmed = TravelRequest(
-            destination=str(tr["destination"]).strip(),
+            destination=str(tr["destination"]),
             departure_date=date.fromisoformat(str(tr["departure_date"]).strip()),
             return_date=date.fromisoformat(str(tr["return_date"]).strip()),
             budget=_coerce_budget(tr["budget"]),
@@ -193,7 +277,7 @@ def plan_node(state: AgentState) -> AgentState:
         state["phase"] = "rank"
 
         msg = (
-            f"Found {len(itineraries)} itinerary option(s). Analyzing..."
+            f"I found {len(itineraries)} itinerary option(s). Here are the best matches."
             if itineraries
             else "No itineraries found. Please try a higher budget."
         )
@@ -245,6 +329,23 @@ def rank_node(state: AgentState) -> AgentState:
     state["phase"] = "rank"
 
     ai_explanation = build_trip_explanation(confirmed, itineraries)
+    if ai_explanation:
+        messages.append({"role": "assistant", "content": ai_explanation})
+        reasoning_log.append(
+            "OpenRouter generated a grounded customer-facing answer from mock itinerary data."
+        )
+    else:
+        messages.append({
+            "role": "assistant",
+            "content": (
+                "I ranked the best itinerary options below. "
+                "Pick the one that feels right, and I will continue the booking flow."
+            ),
+        })
+
+    state["messages"] = messages
+    state["reasoning_log"] = reasoning_log
+    return state
 
     options_text = ""
     if ai_explanation:

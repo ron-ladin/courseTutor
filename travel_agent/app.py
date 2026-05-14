@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import date as date_type
-from html import escape
-
 try:
     from dotenv import load_dotenv
 
@@ -200,8 +198,9 @@ def _inject_theme() -> None:
             border: 1px solid var(--sky-line);
             border-radius: 8px;
             background: #ffffff;
-            padding: 16px;
-            margin: 10px 0;
+            padding: 18px;
+            margin: 14px 0 8px;
+            box-shadow: 0 12px 30px rgba(23, 32, 51, 0.05);
         }
 
         .trip-top {
@@ -231,14 +230,15 @@ def _inject_theme() -> None:
 
         .trip-grid {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 10px;
         }
 
         .fact {
             background: var(--sky-soft);
             border-radius: 8px;
-            padding: 10px;
+            padding: 12px;
+            min-height: 88px;
         }
 
         .label {
@@ -253,6 +253,12 @@ def _inject_theme() -> None:
             color: var(--sky-ink);
             font-weight: 650;
             overflow-wrap: anywhere;
+        }
+
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-color: var(--sky-line);
+            border-radius: 8px;
+            box-shadow: 0 12px 30px rgba(23, 32, 51, 0.05);
         }
 
         .warning {
@@ -329,66 +335,61 @@ def _render_landing() -> None:
 
 
 def _render_trip_card(index: int, itin: Itinerary) -> None:
-    activities = ", ".join(escape(activity.name) for activity in itin.activities) or "None selected"
-    warning = '<span class="warning">Exceeds budget</span>' if itin.is_partial_fallback else ""
-    st.markdown(
-        f"""
-        <div class="trip-card">
-          <div class="trip-top">
-            <div>
-              <h3 class="trip-title">Option {index + 1}: {escape(itin.flight.destination)}</h3>
-              {warning}
-            </div>
-            <div class="score">Match {itin.match_score:.2f}</div>
-          </div>
-          <div class="trip-grid">
-            <div class="fact">
-              <div class="label">Flight</div>
-              <div class="value">{escape(itin.flight.airline)} | ${itin.flight.price:.0f} | {itin.flight.duration_hours:g}h</div>
-            </div>
-            <div class="fact">
-              <div class="label">Hotel</div>
-              <div class="value">{escape(itin.hotel.name)} | ${itin.hotel.price_per_night:.0f}/night</div>
-            </div>
-            <div class="fact">
-              <div class="label">Activities</div>
-              <div class="value">{activities}</div>
-            </div>
-            <div class="fact">
-              <div class="label">Total</div>
-              <div class="value">${itin.total_cost:.0f}</div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    activities = ", ".join(activity.name for activity in itin.activities) or "None selected"
+
+    with st.container(border=True):
+        title_col, score_col = st.columns([4, 1])
+        with title_col:
+            st.subheader(f"Option {index + 1}: {itin.flight.destination}")
+            if itin.is_partial_fallback:
+                st.warning("This option exceeds the stated budget.")
+        with score_col:
+            st.metric("Match", f"{itin.match_score:.0%}")
+
+        flight_col, hotel_col, total_col = st.columns(3)
+        with flight_col:
+            st.caption("FLIGHT")
+            st.markdown(f"**{itin.flight.airline}**")
+            st.write(f"${itin.flight.price:.0f} · {itin.flight.duration_hours:g}h")
+        with hotel_col:
+            st.caption("HOTEL")
+            st.markdown(f"**{itin.hotel.name}**")
+            st.write(f"${itin.hotel.price_per_night:.0f}/night · {itin.hotel.stars} stars")
+        with total_col:
+            st.caption("TOTAL")
+            st.markdown(f"**${itin.total_cost:.0f}**")
+            st.write("Estimated package total")
+
+        st.caption("ACTIVITIES")
+        st.write(activities)
 
 
 def _render_order_summary(itin: Itinerary) -> None:
-    activities = ", ".join(escape(activity.name) for activity in itin.activities) or "None selected"
-    warning = '<span class="warning">This package exceeds your stated budget</span>' if itin.is_partial_fallback else ""
-    st.markdown(
-        f"""
-        <div class="trip-card">
-          <div class="trip-top">
-            <div>
-              <h3 class="trip-title">Order summary</h3>
-              {warning}
-            </div>
-            <div class="score">Match {itin.match_score:.2f}</div>
-          </div>
-          <div class="trip-grid">
-            <div class="fact"><div class="label">Destination</div><div class="value">{escape(itin.flight.destination)}</div></div>
-            <div class="fact"><div class="label">Flight</div><div class="value">{escape(itin.flight.airline)} | ${itin.flight.price:.0f}</div></div>
-            <div class="fact"><div class="label">Hotel</div><div class="value">{escape(itin.hotel.name)} | ${itin.hotel.price_per_night:.0f}/night</div></div>
-            <div class="fact"><div class="label">Total</div><div class="value">${itin.total_cost:.0f}</div></div>
-          </div>
-          <p style="color:#697386;margin:12px 0 0;">Activities: {activities}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    activities = ", ".join(activity.name for activity in itin.activities) or "None selected"
+
+    with st.container(border=True):
+        st.subheader("Order summary")
+        if itin.is_partial_fallback:
+            st.warning("This package exceeds your stated budget.")
+
+        dest_col, flight_col, hotel_col, total_col = st.columns(4)
+        with dest_col:
+            st.caption("DESTINATION")
+            st.markdown(f"**{itin.flight.destination}**")
+        with flight_col:
+            st.caption("FLIGHT")
+            st.markdown(f"**{itin.flight.airline}**")
+            st.write(f"${itin.flight.price:.0f}")
+        with hotel_col:
+            st.caption("HOTEL")
+            st.markdown(f"**{itin.hotel.name}**")
+            st.write(f"${itin.hotel.price_per_night:.0f}/night")
+        with total_col:
+            st.caption("TOTAL")
+            st.markdown(f"**${itin.total_cost:.0f}**")
+
+        st.caption("ACTIVITIES")
+        st.write(activities)
 
 
 def _reset_trip() -> None:
@@ -506,7 +507,7 @@ def _process_stub(state: AgentState, prompt: str) -> None:
     reply: str
 
     if "destination" not in tr:
-        valid = ["Tokyo", "Paris", "Bali", "New York", "Japan", "Greece", "Thailand", "Mexico", "Israel"]
+        valid = ["Tokyo", "Paris", "Bali", "New York", "Barcelona", "Rome", "Athens", "Bangkok", "London", "Mexico City", "Tel Aviv"]
         dest = next((v for v in valid if v.lower() == prompt.strip().lower()), None)
         if dest:
             tr["destination"] = dest

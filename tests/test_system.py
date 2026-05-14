@@ -205,12 +205,13 @@ class TestServerSearch:
         assert r.status_code == 200
         assert len(r.json()) >= 3
 
-    def test_destinations_include_required_demo_and_country_options(self):
+    def test_destinations_include_required_demo_and_city_options(self):
         r = client.get("/destinations")
         assert r.status_code == 200
         dests = r.json()["destinations"]
         assert {"Tokyo", "Paris", "Bali", "New York"}.issubset(set(dests))
-        assert {"Japan", "France", "Italy", "Greece", "Thailand", "Spain", "United Kingdom", "Mexico", "Israel"}.issubset(set(dests))
+        assert {"Kyoto", "Nice", "Rome", "Athens", "Bangkok", "Barcelona", "London", "Mexico City", "Tel Aviv"}.issubset(set(dests))
+        assert not {"Japan", "France", "Italy", "Greece", "Thailand", "Spain", "United Kingdom", "Mexico", "Israel"}.intersection(set(dests))
 
     # Negative
     def test_unknown_destination_returns_empty(self):
