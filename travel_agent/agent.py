@@ -6,12 +6,12 @@ from typing import Any, Optional, TypedDict
 
 try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from .data_client import DataClient
+    from .data.client import DataClient
     from .openrouter_client import build_trip_explanation, extract_travel_request_fields
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from data_client import DataClient
+    from data.client import DataClient
     from openrouter_client import build_trip_explanation, extract_travel_request_fields
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
