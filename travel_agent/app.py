@@ -584,7 +584,21 @@ def _message_key(index: int, message: dict) -> str:
     return f"{index}:{message.get('role', '')}:{message.get('content', '')}"
 
 
-def _stream_markdown(text: str) -> None:
+def _bubble_html(role: str, content: str) -> str:
+    safe_content = escape(content).replace("\n", "<br>")
+    side = "user" if role == "user" else "assistant"
+    return (
+        f'<div class="chat-message-{side}">'
+        f'<div class="chat-bubble-{side}">{safe_content}</div>'
+        "</div>"
+    )
+
+
+def _render_chat_bubble(role: str, content: str) -> None:
+    st.markdown(_bubble_html(role, content), unsafe_allow_html=True)
+
+
+def _stream_chat_bubble(role: str, text: str) -> None:
     placeholder = st.empty()
     rendered = ""
     text = text.replace("$", r"\$")
@@ -594,7 +608,7 @@ def _stream_markdown(text: str) -> None:
         rendered += chunk
         if index < len(chunks) - 1:
             rendered += " "
-        placeholder.markdown(rendered)
+        placeholder.markdown(_bubble_html(role, rendered), unsafe_allow_html=True)
         time.sleep(_STREAM_DELAY_SECONDS)
 
 
@@ -648,24 +662,13 @@ def _render_chat_history(messages: list[dict]) -> None:
         key = _message_key(index, msg)
 
         if role == "user":
-            st.markdown(
-                f'<div class="chat-message-user"><div class="chat-bubble-user">{escape(content)}</div></div>',
-                unsafe_allow_html=True,
-            )
+            _render_chat_bubble("user", content)
         else:
             if key == animated_key:
-                st.markdown(
-                    '<div class="chat-message-assistant"><div class="chat-bubble-assistant">',
-                    unsafe_allow_html=True,
-                )
-                _stream_markdown(content)
-                st.markdown("</div></div>", unsafe_allow_html=True)
+                _stream_chat_bubble("assistant", content)
                 st.session_state.pending_stream_message_key = None
             else:
-                st.markdown(
-                    f'<div class="chat-message-assistant"><div class="chat-bubble-assistant">{escape(content)}</div></div>',
-                    unsafe_allow_html=True,
-                )
+                _render_chat_bubble("assistant", content)
 
 
 _inject_theme()
@@ -1104,25 +1107,28 @@ if state["phase"] in ("onboard", "collect"):
     if prompt := st.chat_input("Where would you like to go?"):
         state["messages"].append({"role": "user", "content": prompt})
         st.session_state.state = state
-        with st.chat_message("user"):
-            st.write(prompt)
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    new_state = graph.invoke(state)
-                    for index in range(len(new_state["messages"]) - 1, -1, -1):
-                        if new_state["messages"][index].get("role") == "assistant":
-                            st.session_state.pending_stream_message_key = _message_key(
-                                index,
-                                new_state["messages"][index],
-                            )
-                            break
-                    st.session_state.state = new_state
-                except Exception as e:
-                    state["messages"].append({"role": "assistant", "content": f"Error: {e}"})
-                    st.session_state.pending_stream_message_key = _message_key(
-                        len(state["messages"]) - 1,
-                        state["messages"][-1],
-                    )
-                    st.session_state.state = state
-        st.rerun()
+        _render_chat_bubble("user", prompt)
+
+        with st.spinner("Thinking..."):
+            try:
+                new_state = graph.invoke(state)
+            except Exception as e:
+                state["messages"].append({"role": "assistant", "content": f"Error: {e}"})
+                new_state = state
+
+        assistant_message = next(
+            (
+                str(message.get("content", ""))
+                for message in reversed(new_state["messages"])
+                if message.get("role") == "assistant"
+            ),
+            "",
+        )
+        if assistant_message:
+            _stream_chat_bubble("assistant", assistant_message)
+
+        st.session_state.pending_stream_message_key = None
+        st.session_state.state = new_state
+
+        if new_state.get("phase") not in ("onboard", "collect"):
+            st.rerun()
