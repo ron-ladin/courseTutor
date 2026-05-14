@@ -21,7 +21,10 @@ with st.sidebar:
         "**Bali / New York** — standard paths"
     )
     st.divider()
-    st.caption("Start the mock server before using:\n`uvicorn mock_server:app --port 8000`")
+    st.caption(
+        "**Live data:** set `AMADEUS_CLIENT_ID` + `AMADEUS_CLIENT_SECRET`\n\n"
+        "App runs standalone with embedded data when no credentials are set."
+    )
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "graph" not in st.session_state:

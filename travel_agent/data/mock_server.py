@@ -3,9 +3,12 @@ from __future__ import annotations
 import uuid
 
 try:
-    from .models import Activity, BookingRequest, Flight, Hotel
-except ImportError:  # allows `uvicorn mock_server:app` from inside travel_agent/
-    from models import Activity, BookingRequest, Flight, Hotel
+    from ..models import Activity, BookingRequest, Flight, Hotel
+except ImportError:
+    try:
+        from models import Activity, BookingRequest, Flight, Hotel
+    except ImportError:
+        from travel_agent.models import Activity, BookingRequest, Flight, Hotel
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 

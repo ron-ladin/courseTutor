@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 try:
     from .models import Activity, Itinerary, TravelRequest
-    from .data_client import DataClient
 except ImportError:
     from models import Activity, Itinerary, TravelRequest
-    from data_client import DataClient
 
 
 # ── Scoring helpers ───────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ def normalize_scores(scores: list[float]) -> list[float]:
 # ── Activity allocation ───────────────────────────────────────────────────────
 
 def _greedy_activities(
-    client: DataClient,
+    client: Any,
     request: TravelRequest,
     budget: float,
     reasoning_log: list[str],
@@ -72,7 +72,7 @@ def _greedy_activities(
 
 def run_planning_loop(
     request: TravelRequest,
-    client: DataClient,
+    client: Any,
     reasoning_log: list[str],
 ) -> list[Itinerary]:
     """

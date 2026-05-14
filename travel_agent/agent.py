@@ -7,11 +7,11 @@ from typing import Optional, TypedDict
 
 try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from .data_client import DataClient
+    from .data.client import LiveDataClient
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from data_client import DataClient
+    from data.client import LiveDataClient
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
 from langgraph.graph import END, StateGraph
@@ -186,7 +186,20 @@ _ACK = {
 
 
 def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
-    if field == "budget":
+    if field == "destination":
+        match = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
+        if not match:
+            return f"'{value.strip()}' isn't available. Please choose from: {', '.join(_VALID_DESTINATIONS)}."
+        tr["destination"] = match
+
+    elif field == "travel_style":
+        styles = [s.strip().lower() for s in value.split(",") if s.strip()]
+        valid = [s for s in styles if s in _VALID_STYLES]
+        if not valid:
+            return f"Please choose at least one from: {', '.join(_VALID_STYLES)}."
+        tr["travel_style"] = ", ".join(valid)
+
+    elif field == "budget":
         try:
             b = float(value.replace("$", "").replace(",", ""))
             if b <= 0:
@@ -439,7 +452,12 @@ def plan_node(state: AgentState) -> AgentState:
         return state
 
     try:
-        itineraries = run_planning_loop(confirmed, DataClient(), reasoning_log)
+        client = LiveDataClient()
+        if getattr(client, "using_live_flights", False):
+            reasoning_log.append("✈ Using live Amadeus flight data.")
+        else:
+            reasoning_log.append("📋 Using static flight data (set AMADEUS_CLIENT_ID + AMADEUS_CLIENT_SECRET for live data).")
+        itineraries = run_planning_loop(confirmed, client, reasoning_log)
         state["itineraries"] = itineraries
         state["reasoning_log"] = reasoning_log
         state["phase"] = "rank"
@@ -642,7 +660,7 @@ def confirm_node(state: AgentState) -> AgentState:
         )
         contact = ContactInfo(**contact_info)
         payment = PaymentInfo(**payment_info)
-        client  = DataClient()
+        client  = LiveDataClient()
 
         reasoning_log.append(f"Booking flight {selected.flight.id} ({selected.flight.airline})...")
         flight_bid = client.book_flight(selected.flight.id, passenger, contact, payment)

@@ -193,7 +193,7 @@ def test_booking_id_is_valid_uuid(num_activities):
         "payment_info": {"card_last4": "1234", "cardholder_name": "TEST USER", "card_expiry": "06/28"},
     }
 
-    with patch("travel_agent.agent.DataClient") as MockClient:
+    with patch("travel_agent.agent.LiveDataClient") as MockClient:
         mc = MagicMock()
         MockClient.return_value = mc
         mc.book_flight.return_value = mock_bid

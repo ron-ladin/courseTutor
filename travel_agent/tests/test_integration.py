@@ -10,7 +10,6 @@ try:
     from travel_agent.agent import (
         AgentState, onboard_node, plan_node, rank_node, confirm_node, build_graph
     )
-    from travel_agent.data_client import DataClient
     from travel_agent.planner import run_planning_loop
 except ImportError:
     from models import (
@@ -19,7 +18,6 @@ except ImportError:
     from agent import (
         AgentState, onboard_node, plan_node, rank_node, confirm_node, build_graph
     )
-    from data_client import DataClient
     from planner import run_planning_loop
 
 
@@ -166,7 +164,7 @@ def test_planning_with_mock_data():
         ),
     ]
     
-    with patch("travel_agent.agent.DataClient") as MockDataClient:
+    with patch("travel_agent.agent.LiveDataClient") as MockDataClient:
         mock_client = MagicMock()
         MockDataClient.return_value = mock_client
         mock_client.get_flights.return_value = mock_flights
@@ -310,7 +308,7 @@ def test_booking_confirmation():
         "payment_info": {"card_last4": "1234", "cardholder_name": "TEST USER", "card_expiry": "06/28"},
     }
 
-    with patch("travel_agent.agent.DataClient") as MockClient:
+    with patch("travel_agent.agent.LiveDataClient") as MockClient:
         mc = MagicMock()
         MockClient.return_value = mc
         mc.book_flight.return_value = mock_bid

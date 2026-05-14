@@ -4,7 +4,7 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
-from travel_agent.mock_server import app
+from travel_agent.data.mock_server import app
 
 
 client = TestClient(app)
