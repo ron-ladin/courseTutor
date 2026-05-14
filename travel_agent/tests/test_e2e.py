@@ -12,26 +12,23 @@ from unittest.mock import patch
 from models import TravelRequest, Itinerary, Flight, Hotel, Activity
 from agent import AgentState, build_graph, confirm_node
 from planner import run_planning_loop
+from data.static import STATIC_DATA
 
 
 class _InMemoryDataClient:
-    """Reads from mock_server._DATA directly — no HTTP server needed."""
+    """Uses embedded static data — no HTTP server or Amadeus credentials needed."""
 
     def get_flights(self, destination: str, date: str):
-        from mock_server import _DATA
-        return list(_DATA.get(destination, {}).get("flights", []))
+        return list(STATIC_DATA.get(destination, {}).get("flights", []))
 
     def get_hotels(self, destination: str, checkin: str, checkout: str, max_price: float = 99999):
-        from mock_server import _DATA
-        return [h for h in _DATA.get(destination, {}).get("hotels", []) if h.price_per_night <= max_price]
+        return [h for h in STATIC_DATA.get(destination, {}).get("hotels", []) if h.price_per_night <= max_price]
 
     def get_activities(self, destination: str):
-        from mock_server import _DATA
-        return list(_DATA.get(destination, {}).get("activities", []))
+        return list(STATIC_DATA.get(destination, {}).get("activities", []))
 
     def destinations(self):
-        from mock_server import _DATA
-        return list(_DATA.keys())
+        return list(STATIC_DATA.keys())
 
 
 def _fresh_state() -> AgentState:
@@ -45,7 +42,27 @@ def _fresh_state() -> AgentState:
         "reasoning_log": [],
         "backtrack_count": 0,
         "phase": "onboard",
+        "passenger_info": {},
+        "contact_info": {},
+        "payment_info": {},
     }
+
+
+_SAMPLE_PASSENGER = {
+    "full_name": "Alon Cohen",
+    "passport_number": "AB123456",
+    "date_of_birth": "1990-01-15",
+}
+_SAMPLE_CONTACT = {
+    "email": "alon@example.com",
+    "phone": "+972501234567",
+    "address": "123 Main St, Tel Aviv",
+}
+_SAMPLE_PAYMENT = {
+    "card_last4": "4242",
+    "cardholder_name": "ALON COHEN",
+    "card_expiry": "06/28",
+}
 
 
 # ── Task 11.1: Full end-to-end flow ──────────────────────────────────────────
@@ -54,7 +71,7 @@ def test_11_1_full_graph_onboard_to_rank():
     """Task 11.1: Full agent graph from first message through plan/rank using in-memory data."""
     graph = build_graph()
 
-    with patch("agent.DataClient", _InMemoryDataClient):
+    with patch("agent.LiveDataClient", _InMemoryDataClient):
         state = _fresh_state()
 
         # First invoke — graph asks for destination
@@ -95,7 +112,8 @@ def test_11_1_full_graph_onboard_to_rank():
 
 def test_11_1_confirm_node_produces_valid_booking():
     """Task 11.1: confirm_node integration — produces a valid UUID v4 booking."""
-    from mock_server import _DATA
+    from unittest.mock import MagicMock
+    from data.static import STATIC_DATA as _DATA
 
     flight = _DATA["Tokyo"]["flights"][0]
     hotel = _DATA["Tokyo"]["hotels"][0]
@@ -110,18 +128,28 @@ def test_11_1_confirm_node_produces_valid_booking():
     state = _fresh_state()
     state["selected_itinerary"] = itin
     state["phase"] = "confirm"
-    state = confirm_node(state)
+    state["passenger_info"] = _SAMPLE_PASSENGER
+    state["contact_info"] = _SAMPLE_CONTACT
+    state["payment_info"] = _SAMPLE_PAYMENT
+
+    mock_bid = str(uuid.uuid4())
+    with patch("agent.LiveDataClient") as MockClient:
+        mc = MagicMock()
+        MockClient.return_value = mc
+        mc.book_flight.return_value = mock_bid
+        mc.book_hotel.return_value = str(uuid.uuid4())
+        mc.book_activity.return_value = str(uuid.uuid4())
+        state = confirm_node(state)
 
     assert state["phase"] == "done"
     assert state["booking"] is not None
-
     booking_uuid = uuid.UUID(state["booking"].booking_id)
     assert booking_uuid.version == 4
 
 
 def test_11_1_no_restart_after_done():
     """Task 11.1: Once phase is 'done', the graph's onboard node re-confirms (state preserved)."""
-    with patch("agent.DataClient", _InMemoryDataClient):
+    with patch("agent.LiveDataClient", _InMemoryDataClient):
         state = _fresh_state()
         # Pre-fill all travel_request fields so onboard auto-confirms
         state["travel_request"] = {
@@ -182,14 +210,15 @@ def test_11_2_paris_reasoning_log_contains_hotel_search():
         f"Expected hotel search entry for Paris in reasoning log. Got:\n{chr(10).join(log)}"
     )
 
-    # max_price must equal budget minus cheapest flight price
-    from mock_server import _DATA
+    # max_price is now per-night: (budget - flight) / nights
+    from data.static import STATIC_DATA as _DATA
     cheapest_flight = min(_DATA["Paris"]["flights"], key=lambda f: f.price)
-    expected_max = 1500.0 - cheapest_flight.price
+    nights = (date(2025, 4, 8) - date(2025, 4, 1)).days
+    expected_max_per_night = (1500.0 - cheapest_flight.price) / nights
     assert any(
-        f"max_price={expected_max:.2f}" in e for e in hotel_search_entries
+        f"max_price={expected_max_per_night:.0f}" in e for e in hotel_search_entries
     ), (
-        f"Expected max_price={expected_max:.2f} in log entries:\n{hotel_search_entries}"
+        f"Expected max_price={expected_max_per_night:.0f} in log entries:\n{hotel_search_entries}"
     )
 
 
