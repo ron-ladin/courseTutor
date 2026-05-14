@@ -1,55 +1,46 @@
-import uuid
-from datetime import date as date_type
-
 import streamlit as st
 
 from agent import AgentState, build_graph
-from models import BookingConfirmation, Itinerary, TravelRequest
+from models import Itinerary
 
 st.set_page_config(page_title="Travel Planning Agent", layout="centered")
 st.title("Travel Planning Agent")
 
-_VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
-
-# ── session state init ────────────────────────────────────────────────────────
+# ── Session state init ────────────────────────────────────────────────────────
 if "graph" not in st.session_state:
     st.session_state.graph = build_graph()
     st.session_state.state: AgentState = {
-        "messages": [],
-        "travel_request": {},
-        "confirmed_request": None,
-        "itineraries": [],
+        "messages":           [],
+        "travel_request":     {},
+        "confirmed_request":  None,
+        "itineraries":        [],
         "selected_itinerary": None,
-        "booking": None,
-        "reasoning_log": [],
-        "backtrack_count": 0,
-        "phase": "onboard",
+        "booking":            None,
+        "reasoning_log":      [],
+        "backtrack_count":    0,
+        "phase":              "onboard",
+        "passenger_info":     {},
+        "contact_info":       {},
+        "payment_info":       {},
     }
 
 state: AgentState = st.session_state.state
+graph = st.session_state.graph
 
-# First-load greeting
+# First-load: let the graph ask the opening question
 if not state["messages"]:
-    if st.session_state.graph is not None:
-        # Let the graph ask the first question
-        new_state = st.session_state.graph.invoke(state)
-        st.session_state.state = new_state
-    else:
-        state["messages"].append({
-            "role": "assistant",
-            "content": "Hello! I'm your travel planning assistant. Where would you like to travel? (Tokyo, Paris, Bali, New York)",
-        })
-        st.session_state.state = state
+    new_state = graph.invoke(state)
+    st.session_state.state = new_state
     st.rerun()
 
 
-# ── chat history ──────────────────────────────────────────────────────────────
+# ── Chat history ──────────────────────────────────────────────────────────────
 for msg in state["messages"]:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
 
-# ── reasoning panel ───────────────────────────────────────────────────────────
+# ── Reasoning panel ───────────────────────────────────────────────────────────
 with st.expander("Agent Reasoning", expanded=False):
     if state["reasoning_log"]:
         for entry in state["reasoning_log"]:
@@ -60,32 +51,32 @@ with st.expander("Agent Reasoning", expanded=False):
         st.write("Planning in progress...")
 
 
-# ── itinerary cards ───────────────────────────────────────────────────────────
-if state["phase"] == "rank" and not state["itineraries"]:
-    st.error("Unable to find a matching itinerary. Please restart with a higher budget.")
+# ── Itinerary cards (rank phase) ──────────────────────────────────────────────
+if state["phase"] == "rank":
+    if not state["itineraries"]:
+        st.error("Unable to find a matching itinerary. Please restart with a higher budget.")
+    else:
+        st.divider()
+        st.subheader("Your Itinerary Options")
+        for i, itin in enumerate(state["itineraries"]):
+            with st.container(border=True):
+                fallback = "  ⚠️ Exceeds Budget" if itin.is_partial_fallback else ""
+                st.subheader(f"Option {i + 1}  —  Score: {itin.match_score:.2f}{fallback}")
+                st.write(f"**Flight:** {itin.flight.airline} ({itin.flight.id})  —  ${itin.flight.price:.2f}  ({itin.flight.duration_hours}h)")
+                st.write(f"**Hotel:** {itin.hotel.name}  —  ${itin.hotel.price_per_night:.2f}/night  ({itin.hotel.stars}★)")
+                st.write(f"**Activities:** {', '.join(a.name for a in itin.activities) or 'None'}")
+                st.write(f"**Total Cost:** ${itin.total_cost:.2f}")
 
-if state["phase"] == "rank" and state["itineraries"]:
-    st.divider()
-    st.subheader("Your Itinerary Options")
-    for i, itin in enumerate(state["itineraries"]):
-        with st.container(border=True):
-            fallback_label = "  Warning: Exceeds Budget" if itin.is_partial_fallback else ""
-            st.subheader(f"Option {i + 1}  —  Score: {itin.match_score:.2f}{fallback_label}")
-            st.write(f"**Flight:** {itin.flight.airline} ({itin.flight.id})  —  ${itin.flight.price:.2f}  ({itin.flight.duration_hours}h)")
-            st.write(f"**Hotel:** {itin.hotel.name}  —  ${itin.hotel.price_per_night:.2f}/night  ({itin.hotel.stars} stars)")
-            if itin.activities:
-                st.write(f"**Activities:** {', '.join(a.name for a in itin.activities)}")
-            else:
-                st.write("**Activities:** None")
-            st.write(f"**Total Cost:** ${itin.total_cost:.2f}")
-            if st.button(f"Select Option {i + 1}", key=f"select_{i}"):
-                state["selected_itinerary"] = itin
-                state["phase"] = "confirm"
-                st.session_state.state = state
-                st.rerun()
+                if st.button(f"Select Option {i + 1}", key=f"select_{i}"):
+                    state["selected_itinerary"] = itin
+                    state["phase"] = "collect"
+                    # Invoke graph immediately so collect_passenger_node asks the first question
+                    new_state = graph.invoke(state)
+                    st.session_state.state = new_state
+                    st.rerun()
 
 
-# ── confirm: order summary ────────────────────────────────────────────────────
+# ── Confirm panel (after passenger collection) ────────────────────────────────
 if state["phase"] == "confirm" and state["selected_itinerary"]:
     itin: Itinerary = state["selected_itinerary"]
     st.divider()
@@ -96,193 +87,51 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
         st.write(f"**Destination:** {itin.flight.destination}")
         st.write(f"**Flight:** {itin.flight.airline} ({itin.flight.id})  —  ${itin.flight.price:.2f}")
         st.write(f"**Hotel:** {itin.hotel.name}  —  ${itin.hotel.price_per_night:.2f}/night")
-        if itin.activities:
-            st.write(f"**Activities:** {', '.join(a.name for a in itin.activities)}")
+        st.write(f"**Activities:** {', '.join(a.name for a in itin.activities) or 'None'}")
         st.write(f"**Total Cost:** ${itin.total_cost:.2f}")
         st.write(f"**Match Score:** {itin.match_score:.2f}")
 
-    if st.button("Confirm Booking"):
-        booking_id = str(uuid.uuid4())
-        state["booking"] = BookingConfirmation(booking_id=booking_id, itinerary=itin)
-        state["phase"] = "done"
-        state["messages"].append({
-            "role": "assistant",
-            "content": f"Booking confirmed! Your Booking ID is: **{booking_id}**",
-        })
-        st.session_state.state = state
+    p = state.get("passenger_info", {})
+    c = state.get("contact_info",   {})
+    pay = state.get("payment_info", {})
+    with st.container(border=True):
+        st.write(f"**Passenger:** {p.get('full_name')} | Passport: {p.get('passport_number')}")
+        st.write(f"**Contact:** {c.get('email')} | {c.get('phone')}")
+        st.write(f"**Card:** **** {pay.get('card_last4')} (exp {pay.get('card_expiry')})")
+
+    if st.button("Confirm & Book"):
+        # confirm_node calls the server and records all booking IDs
+        new_state = graph.invoke(state)
+        st.session_state.state = new_state
         st.rerun()
 
 
-# ── done: booking confirmation ────────────────────────────────────────────────
+# ── Done: booking confirmation ────────────────────────────────────────────────
 if state["phase"] == "done" and state["booking"]:
     st.divider()
-    st.success(f"Booking Confirmed — ID: `{state['booking'].booking_id}`")
+    booking = state["booking"]
+    st.success(f"Booking Confirmed — Flight ID: `{booking.booking_id}`")
+    if booking.hotel_booking_id:
+        st.info(f"Hotel ID: `{booking.hotel_booking_id}`")
+    for bid in booking.activity_booking_ids:
+        st.info(f"Activity ID: `{bid}`")
 
 
-# ── stub-mode helpers ─────────────────────────────────────────────────────────
-
-def _run_planning(state: AgentState) -> None:
-    """Call the real planner directly (used when build_graph() is still a stub)."""
-    from data_client import DataClient
-    from planner import run_planning_loop
-
-    tr = state["travel_request"]
-    try:
-        request = TravelRequest(
-            destination=tr["destination"],
-            departure_date=date_type.fromisoformat(tr["departure_date"]),
-            return_date=date_type.fromisoformat(tr["return_date"]),
-            budget=float(tr["budget"]),
-            travel_style=tr.get("travel_style", []),
-        )
-        state["confirmed_request"] = request
-        log: list[str] = state["reasoning_log"]
-        itineraries = run_planning_loop(request, DataClient(), log)
-        state["reasoning_log"] = log
-
-        if not itineraries:
-            state["messages"].append({
-                "role": "assistant",
-                "content": "Unable to find a matching itinerary. Please restart with a higher budget.",
-            })
-            state["phase"] = "onboard"
-            state["travel_request"] = {}
-        else:
-            state["itineraries"] = itineraries
-            state["phase"] = "rank"
-            state["messages"].append({
-                "role": "assistant",
-                "content": f"Found {len(itineraries)} itinerary option(s). Review and select one below.",
-            })
-    except ConnectionError as e:
-        state["messages"].append({"role": "assistant", "content": str(e)})
-        state["phase"] = "onboard"
-    except Exception as e:
-        state["messages"].append({"role": "assistant", "content": f"Planning error: {e}"})
-        state["phase"] = "onboard"
-
-
-def _process_stub(state: AgentState, prompt: str) -> None:
-    """Sequential onboarding flow used while build_graph() returns None."""
-    tr = state["travel_request"]
-    reply: str
-
-    if "destination" not in tr:
-        valid = ["Tokyo", "Paris", "Bali", "New York"]
-        dest = next((v for v in valid if v.lower() == prompt.strip().lower()), None)
-        if dest:
-            tr["destination"] = dest
-            reply = "What is your departure date? (YYYY-MM-DD)"
-        else:
-            reply = f"Please choose from: {', '.join(valid)}."
-
-    elif "departure_date" not in tr:
-        try:
-            date_type.fromisoformat(prompt.strip())
-            tr["departure_date"] = prompt.strip()
-            reply = "What is your return date? (YYYY-MM-DD)"
-        except ValueError:
-            reply = "Please enter a valid date in YYYY-MM-DD format."
-
-    elif "return_date" not in tr:
-        try:
-            ret = date_type.fromisoformat(prompt.strip())
-            dep = date_type.fromisoformat(tr["departure_date"])
-            if ret <= dep:
-                reply = "Return date must be after departure date. Please re-enter."
-            else:
-                tr["return_date"] = prompt.strip()
-                reply = "What is your total budget in USD?"
-        except ValueError:
-            reply = "Please enter a valid date in YYYY-MM-DD format."
-
-    elif "budget" not in tr:
-        try:
-            budget = float(prompt.strip().replace("$", "").replace(",", ""))
-            if budget <= 0:
-                reply = "Please enter a positive number for your budget."
-            else:
-                tr["budget"] = budget
-                reply = (
-                    f"What travel styles do you prefer? "
-                    f"(comma-separated from: {', '.join(_VALID_STYLES)})"
-                )
-        except ValueError:
-            reply = "Please enter a positive number for your budget."
-
-    elif "travel_style" not in tr:
-        styles = [s.strip().lower() for s in prompt.split(",") if s.strip().lower() in _VALID_STYLES]
-        if not styles:
-            reply = f"Please choose at least one from: {', '.join(_VALID_STYLES)}."
-        else:
-            tr["travel_style"] = styles
-            reply = (
-                f"Here's your trip summary:\n"
-                f"- Destination: {tr['destination']}\n"
-                f"- Dates: {tr['departure_date']} → {tr['return_date']}\n"
-                f"- Budget: ${tr['budget']:.0f}\n"
-                f"- Style: {', '.join(styles)}\n\n"
-                f"Shall I proceed with planning? (yes / no)"
-            )
-
-    elif prompt.strip().lower() in ("yes", "y"):
-        state["travel_request"] = tr
-        state["messages"].append({"role": "assistant", "content": "On it! Planning your trip..."})
-        _run_planning(state)
-        return
-
-    elif prompt.strip().lower() in ("no", "n"):
-        state["travel_request"] = {}
-        reply = "No problem! Where would you like to travel? (Tokyo, Paris, Bali, New York)"
-
-    else:
-        reply = "Please reply with 'yes' to proceed or 'no' to start over."
-
-    state["travel_request"] = tr
-    state["messages"].append({"role": "assistant", "content": reply})
-
-
-# ── chat input ────────────────────────────────────────────────────────────────
-if state["phase"] != "done":
+# ── Chat input ────────────────────────────────────────────────────────────────
+# Only show during phases that expect text input
+if state["phase"] in ("onboard", "collect"):
     if prompt := st.chat_input("Type your response..."):
         state["messages"].append({"role": "user", "content": prompt})
-
-        graph = st.session_state.graph
-        if graph is not None:
-            try:
-                new_state = graph.invoke(state)
-                st.session_state.state = new_state
-            except ConnectionError:
-                state["messages"].append({
-                    "role": "assistant",
-                    "content": "Cannot reach the travel data server. Run: `uvicorn mock_server:app --port 8000`",
-                })
-                st.session_state.state = state
-            except ValueError as e:
-                msg = str(e).lower()
-                if "destination" in msg or "not found" in msg:
-                    try:
-                        from data_client import DataClient
-                        dest_list = ", ".join(DataClient().destinations())
-                    except Exception:
-                        dest_list = "Tokyo, Paris, Bali, New York"
-                    state["messages"].append({
-                        "role": "assistant",
-                        "content": f"That destination isn't available. Please choose from: {dest_list}.",
-                    })
-                elif "itinerar" in msg or "no match" in msg:
-                    state["messages"].append({
-                        "role": "assistant",
-                        "content": "Unable to find a matching itinerary. Please restart with a higher budget.",
-                    })
-                else:
-                    state["messages"].append({"role": "assistant", "content": f"Error: {e}"})
-                st.session_state.state = state
-            except Exception as e:
-                state["messages"].append({"role": "assistant", "content": f"Unexpected error: {e}"})
-                st.session_state.state = state
-        else:
-            _process_stub(state, prompt)
+        try:
+            new_state = graph.invoke(state)
+            st.session_state.state = new_state
+        except ConnectionError:
+            state["messages"].append({
+                "role": "assistant",
+                "content": "Cannot reach the travel data server. Run: `uvicorn mock_server:app --port 8000`",
+            })
             st.session_state.state = state
-
+        except Exception as e:
+            state["messages"].append({"role": "assistant", "content": f"Unexpected error: {e}"})
+            st.session_state.state = state
         st.rerun()
