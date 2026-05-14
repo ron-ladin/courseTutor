@@ -1,7 +1,5 @@
+from pydantic import BaseModel, model_validator
 from datetime import date
-from uuid import UUID
-
-from pydantic import BaseModel, Field, field_validator
 
 
 class TravelRequest(BaseModel):
@@ -9,22 +7,19 @@ class TravelRequest(BaseModel):
     departure_date: date
     return_date: date
     budget: float
-    travel_style: list[str] = Field(default_factory=list)
+    travel_style: list[str] = []
 
-    @field_validator("budget")
-    @classmethod
-    def budget_must_be_positive(cls, value: float) -> float:
-        if value <= 0:
-            raise ValueError("Budget must be a positive number")
-        return value
+    @model_validator(mode="after")
+    def budget_must_be_positive(self):
+        if self.budget <= 0:
+            raise ValueError("budget must be positive")
+        return self
 
-    @field_validator("return_date")
-    @classmethod
-    def return_after_departure(cls, value: date, info) -> date:
-        departure_date = info.data.get("departure_date")
-        if departure_date is not None and value <= departure_date:
-            raise ValueError("Return date must be after departure date")
-        return value
+    @model_validator(mode="after")
+    def return_after_departure(self):
+        if self.return_date <= self.departure_date:
+            raise ValueError("return_date must be after departure_date")
+        return self
 
 
 class Flight(BaseModel):
@@ -33,7 +28,7 @@ class Flight(BaseModel):
     price: float
     airline: str
     duration_hours: float
-    style_tags: list[str] = Field(default_factory=list)
+    style_tags: list[str] = []
 
 
 class Hotel(BaseModel):
@@ -42,7 +37,7 @@ class Hotel(BaseModel):
     name: str
     price_per_night: float
     stars: int
-    style_tags: list[str] = Field(default_factory=list)
+    style_tags: list[str] = []
 
 
 class Activity(BaseModel):
@@ -50,18 +45,18 @@ class Activity(BaseModel):
     destination: str
     name: str
     price: float
-    style_tags: list[str] = Field(default_factory=list)
+    style_tags: list[str] = []
 
 
 class Itinerary(BaseModel):
     flight: Flight
     hotel: Hotel
-    activities: list[Activity] = Field(default_factory=list)
-    total_cost: float
+    activities: list[Activity] = []
+    total_cost: float = 0.0
     match_score: float = 0.0
     is_partial_fallback: bool = False
 
 
 class BookingConfirmation(BaseModel):
-    booking_id: UUID
+    booking_id: str
     itinerary: Itinerary

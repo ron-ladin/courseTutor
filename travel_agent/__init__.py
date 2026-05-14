@@ -1,1 +1,1 @@
-"""Travel Planning Agent package."""
+"""Travel Planning Agent - Hackathon project."""
