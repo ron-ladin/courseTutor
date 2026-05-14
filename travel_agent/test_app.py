@@ -119,9 +119,29 @@ def test_reasoning_log_is_list():
     assert isinstance(state["reasoning_log"], list)
 
 
+class _InMemoryDataClient:
+    """Reads directly from mock_server._DATA — no HTTP server needed."""
+    from mock_server import _DATA as _mock_data
+
+    def get_flights(self, destination: str, date: str):
+        from mock_server import _DATA
+        return list(_DATA.get(destination, {}).get("flights", []))
+
+    def get_hotels(self, destination: str, checkin: str, checkout: str, max_price: float = 99999):
+        from mock_server import _DATA
+        return [h for h in _DATA.get(destination, {}).get("hotels", []) if h.price_per_night <= max_price]
+
+    def get_activities(self, destination: str):
+        from mock_server import _DATA
+        return list(_DATA.get(destination, {}).get("activities", []))
+
+    def destinations(self) -> list[str]:
+        from mock_server import _DATA
+        return list(_DATA.keys())
+
+
 def test_reasoning_log_grows_after_planning():
-    """Once the real planner is wired, log must be non-empty after a run."""
-    from data_client import DataClient
+    """Reasoning log is non-empty and grows after a real planning run."""
     from planner import run_planning_loop
 
     request = TravelRequest(
@@ -132,13 +152,72 @@ def test_reasoning_log_grows_after_planning():
         travel_style=["adventure", "culture"],
     )
     log: list[str] = []
-    run_planning_loop(request, DataClient(), log)
+    run_planning_loop(request, _InMemoryDataClient(), log)
 
-    # Stub returns [] so log stays empty — test will enforce growth once real
-    # planner lands.  For now just verify the interface contract.
-    assert isinstance(log, list)
-    # Uncomment after planner is real:
-    # assert len(log) > 0
+    assert len(log) > 0, "Reasoning log must have entries after planning"
+    assert all(isinstance(entry, str) for entry in log)
+
+
+# ── integration smoke tests ───────────────────────────────────────────────────
+
+def test_tokyo_happy_path_produces_itineraries():
+    """Full planning run for Tokyo returns 1-3 itineraries within budget."""
+    from planner import run_planning_loop
+
+    budget = 1500.0
+    request = TravelRequest(
+        destination="Tokyo",
+        departure_date=date(2025, 3, 10),
+        return_date=date(2025, 3, 17),
+        budget=budget,
+        travel_style=["adventure", "culture"],
+    )
+    log: list[str] = []
+    itineraries = run_planning_loop(request, _InMemoryDataClient(), log)
+
+    assert 1 <= len(itineraries) <= 3
+    for itin in itineraries:
+        if not itin.is_partial_fallback:
+            assert itin.total_cost <= budget
+        assert itin.flight.destination == "Tokyo"
+        assert itin.hotel.destination == "Tokyo"
+
+
+def test_paris_low_budget_triggers_partial_fallback():
+    """Paris with a budget below hotel prices triggers the backtrack + partial fallback path."""
+    from planner import run_planning_loop
+
+    request = TravelRequest(
+        destination="Paris",
+        departure_date=date(2025, 4, 1),
+        return_date=date(2025, 4, 8),
+        budget=1000.0,  # all Paris hotels > $1,500/night — always over budget
+        travel_style=["romance", "culture"],
+    )
+    log: list[str] = []
+    itineraries = run_planning_loop(request, _InMemoryDataClient(), log)
+
+    assert len(itineraries) >= 1
+    assert any(itin.is_partial_fallback for itin in itineraries)
+    backtrack_entries = [e for e in log if "Backtrack" in e or "backtrack" in e]
+    assert len(backtrack_entries) >= 1
+
+
+def test_itineraries_sorted_by_match_score_descending():
+    """Returned itineraries are ranked highest score first (Property 13)."""
+    from planner import run_planning_loop
+
+    request = TravelRequest(
+        destination="Tokyo",
+        departure_date=date(2025, 3, 10),
+        return_date=date(2025, 3, 17),
+        budget=2000.0,
+        travel_style=["luxury", "culture"],
+    )
+    itineraries = run_planning_loop(request, _InMemoryDataClient(), [])
+
+    for i in range(len(itineraries) - 1):
+        assert itineraries[i].match_score >= itineraries[i + 1].match_score
 
 
 # ── Property 16: BookingID is a valid UUID v4 ─────────────────────────────────
