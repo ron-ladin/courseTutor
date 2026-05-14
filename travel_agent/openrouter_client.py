@@ -301,3 +301,74 @@ def extract_travel_request_fields(user_message: str) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def generate_travel_followup(
+    missing_field: str,
+    current_request: dict[str, Any],
+    chat_history: list[dict],
+    last_user_message: str | None = None,
+) -> str | None:
+    """
+    Ask for the next missing travel-planning field in a natural agent voice.
+
+    The graph still controls which field is needed; OpenRouter only improves the
+    wording so the experience feels like a travel concierge instead of a form.
+    """
+    if not openrouter_enabled():
+        return None
+
+    field_labels = {
+        "destination": "destination city or country",
+        "departure_date": "departure date in YYYY-MM-DD format",
+        "return_date": "return date in YYYY-MM-DD format",
+        "budget": "total budget in USD",
+        "travel_style": "preferred travel style, such as adventure, culture, luxury, romance, nature, or food",
+    }
+    label = field_labels.get(missing_field, missing_field.replace("_", " "))
+    supported = ", ".join(STATIC_DATA.keys())
+    known = json.dumps(current_request, default=str)
+
+    system = (
+        "You are SkySwift AI, a polished travel concierge inside a chat product. "
+        "You are warm, concise, and specific. You help the customer plan a trip using the supported demo destinations. "
+        "Never pretend you already searched flights or hotels before the planner runs. "
+        "Ask for exactly one missing detail. Do not mention internal field names."
+    )
+
+    messages: list[dict] = [{"role": "system", "content": system}]
+    messages.extend(chat_history[-6:])
+    messages.append({
+        "role": "user",
+        "content": (
+            f"Known trip details so far: {known}\n"
+            f"Supported destinations: {supported}\n"
+            f"Next missing detail: {label}\n"
+            f"Customer just said: {last_user_message or ''}\n"
+            "Write the next assistant message. One or two short sentences. "
+            "If the customer only greeted you or gave an unsupported destination, respond naturally and ask for the destination."
+        ),
+    })
+
+    try:
+        payload: dict[str, Any] = {
+            "model": os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL),
+            "messages": messages,
+            "temperature": 0.55,
+            "max_tokens": 100,
+        }
+        response = httpx.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:8501",
+                "X-Title": "SkySwift Travel Planning Agent",
+            },
+            json=payload,
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return None

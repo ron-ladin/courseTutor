@@ -13,6 +13,7 @@ try:
         extract_travel_request_fields,
         extract_passenger_fields,
         generate_conversational_prompt,
+        generate_travel_followup,
     )
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
@@ -24,6 +25,7 @@ except ImportError:
         extract_travel_request_fields,
         extract_passenger_fields,
         generate_conversational_prompt,
+        generate_travel_followup,
     )
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
@@ -54,15 +56,27 @@ class AgentState(TypedDict):
 _FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
 
 _QUESTIONS = {
-    "destination":    "What is your destination? You can type a city or country, like Tokyo, Italy, Greece, Thailand, or Mexico.",
-    "departure_date": "What is your departure date? (YYYY-MM-DD)",
-    "return_date":    "What is your return date? (YYYY-MM-DD)",
-    "budget":         "What is your total budget in USD?",
-    "travel_style":   "What travel styles do you prefer? (e.g. adventure, culture, luxury)",
+    "destination":    "Great, let us start with the fun part. Where would you like to fly today? You can choose a city or country, like Tokyo, Greece, Thailand, Mexico, or Israel.",
+    "departure_date": "Nice choice. What date would you like to depart? Please use YYYY-MM-DD so I can plan accurately.",
+    "return_date":    "And when should you come back? Send the return date in YYYY-MM-DD format.",
+    "budget":         "Perfect. What total budget should I keep in mind for the trip, in USD?",
+    "travel_style":   "What travel style should this feel like: adventure, culture, luxury, romance, nature, food, or budget-friendly?",
 }
 
 _VALID_DESTINATIONS = sorted(STATIC_DATA.keys(), key=len, reverse=True)
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
+
+
+def _ask_for_field(field: str, tr: dict, messages: list[dict], last_user: str | None = None) -> str:
+    if last_user is None:
+        opening_questions = {
+            "destination": "Hi, I am SkySwift AI. Tell me your destination, and I will help shape the trip from there.",
+        }
+        return opening_questions.get(field, _QUESTIONS[field])
+    return (
+        generate_travel_followup(field, tr, messages, last_user)
+        or _QUESTIONS[field]
+    )
 
 
 def _local_extract_travel_fields(text: str) -> dict[str, Any]:
@@ -118,7 +132,12 @@ def _apply_extracted_fields(tr: dict, extracted: dict[str, Any]) -> None:
 
 def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
     """Store validated value in tr. Returns an error message string, or None on success."""
-    if field == "budget":
+    if field == "destination":
+        destination = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
+        if destination is None:
+            return "I can help with Tokyo, Paris, Bali, New York, Japan, France, Italy, Greece, Thailand, Spain, United Kingdom, Mexico, or Israel. Where would you like to go?"
+        tr["destination"] = destination
+    elif field == "budget":
         try:
             budget = float(value.replace("$", "").replace(",", ""))
             if budget <= 0:
@@ -141,6 +160,8 @@ def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
             tr["return_date"] = value
         except ValueError:
             return "Please enter a valid date (YYYY-MM-DD)."
+    elif field == "travel_style":
+        tr[field] = value
     else:
         tr[field] = value
     return None
@@ -215,7 +236,10 @@ def onboard_node(state: AgentState) -> AgentState:
         if next_field is not None and not handled_as_natural_message:
             error = _validate_and_store(next_field, last_user, tr)
             if error:
-                messages.append({"role": "assistant", "content": error})
+                if next_field == "destination":
+                    messages.append({"role": "assistant", "content": _ask_for_field("destination", tr, messages, last_user)})
+                else:
+                    messages.append({"role": "assistant", "content": error})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 return state
@@ -226,20 +250,20 @@ def onboard_node(state: AgentState) -> AgentState:
                 return _build_confirmed_request(state, messages, tr)
             elif last_user.lower() in ("no", "n"):
                 tr = {}
-                messages.append({"role": "assistant", "content": "No problem! Where would you like to travel? You can type a city or country."})
+                messages.append({"role": "assistant", "content": _ask_for_field("destination", {}, messages, last_user)})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"
                 return state
             else:
-                messages.append({"role": "assistant", "content": "Please type 'yes' to confirm or 'no' to start over."})
+                messages.append({"role": "assistant", "content": "I have the main trip details ready. Should I start planning this itinerary now? Reply yes to continue or no to start over."})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"
                 return state
 
     if next_field is not None:
-        messages.append({"role": "assistant", "content": _QUESTIONS[next_field]})
+        messages.append({"role": "assistant", "content": _ask_for_field(next_field, tr, messages, last_user)})
     else:
         if last_user is not None:
             messages.append({"role": "assistant", "content": _summary_text(tr)})
