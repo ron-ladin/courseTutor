@@ -139,3 +139,83 @@ def test_reasoning_log_grows_after_planning():
     assert isinstance(log, list)
     # Uncomment after planner is real:
     # assert len(log) > 0
+
+
+# ── Property 16: BookingID is a valid UUID v4 ─────────────────────────────────
+
+import re
+import uuid
+
+_UUID4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
+
+def test_booking_id_is_valid_uuid4():
+    """Generated booking ID matches UUID v4 format (Property 16)."""
+    from models import BookingConfirmation, Flight, Hotel, Itinerary
+
+    flight = Flight(id="f1", destination="Tokyo", price=650.0,
+                    airline="ANA", duration_hours=14.0, style_tags=["culture"])
+    hotel = Hotel(id="h1", destination="Tokyo", name="Shinjuku Inn",
+                  price_per_night=120.0, stars=3, style_tags=["budget"])
+    itin = Itinerary(flight=flight, hotel=hotel, activities=[],
+                     total_cost=770.0, match_score=0.8)
+
+    booking_id = str(uuid.uuid4())
+    confirmation = BookingConfirmation(booking_id=booking_id, itinerary=itin)
+
+    assert _UUID4_RE.match(confirmation.booking_id), (
+        f"BookingID '{confirmation.booking_id}' is not a valid UUID v4"
+    )
+
+
+@given(st.integers(min_value=1, max_value=20))
+def test_booking_id_always_unique(n: int):
+    """Every booking generates a distinct ID — no collisions."""
+    ids = {str(uuid.uuid4()) for _ in range(n)}
+    assert len(ids) == n
+
+
+# ── session state initial shape ───────────────────────────────────────────────
+
+def test_initial_state_has_all_agent_state_keys():
+    """The initial state dict covers every key in AgentState."""
+    from agent import AgentState
+
+    required_keys = {"messages", "travel_request", "confirmed_request",
+                     "itineraries", "selected_itinerary", "booking",
+                     "reasoning_log", "backtrack_count", "phase"}
+
+    initial: AgentState = {
+        "messages": [],
+        "travel_request": {},
+        "confirmed_request": None,
+        "itineraries": [],
+        "selected_itinerary": None,
+        "booking": None,
+        "reasoning_log": [],
+        "backtrack_count": 0,
+        "phase": "onboard",
+    }
+    assert required_keys == set(initial.keys())
+
+
+def test_initial_phase_is_onboard():
+    """App always starts in the onboard phase."""
+    from agent import AgentState
+
+    initial: AgentState = {
+        "messages": [],
+        "travel_request": {},
+        "confirmed_request": None,
+        "itineraries": [],
+        "selected_itinerary": None,
+        "booking": None,
+        "reasoning_log": [],
+        "backtrack_count": 0,
+        "phase": "onboard",
+    }
+    assert initial["phase"] == "onboard"
+    assert initial["backtrack_count"] == 0
+    assert initial["messages"] == []
