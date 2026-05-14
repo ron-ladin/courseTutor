@@ -28,16 +28,18 @@ if "graph" not in st.session_state:
 
 state: AgentState = st.session_state.state
 
-# First-load greeting (stub mode only — graph injects its own greeting when real)
-if st.session_state.graph is None and not state["messages"]:
-    state["messages"].append({
-        "role": "assistant",
-        "content": (
-            "Hello! I'm your travel planning assistant. "
-            "Where would you like to travel? (Tokyo, Paris, Bali, New York)"
-        ),
-    })
-    st.session_state.state = state
+# First-load greeting
+if not state["messages"]:
+    if st.session_state.graph is not None:
+        # Let the graph ask the first question
+        new_state = st.session_state.graph.invoke(state)
+        st.session_state.state = new_state
+    else:
+        state["messages"].append({
+            "role": "assistant",
+            "content": "Hello! I'm your travel planning assistant. Where would you like to travel? (Tokyo, Paris, Bali, New York)",
+        })
+        st.session_state.state = state
     st.rerun()
 
 

@@ -99,8 +99,8 @@ def test_itinerary_ranking_order(num_itineraries):
     itineraries = []
     for i in range(num_itineraries):
         itinerary = Itinerary(
-            flight=Flight(id=f"FL{i}", price=float(i * 100), airline="Test"),
-            hotel=Hotel(id=f"HT{i}", name=f"Hotel {i}", price_per_night=float(50 + i * 10)),
+            flight=Flight(id=f"FL{i}", destination="Tokyo", price=float(i * 100), airline="Test", duration_hours=12.0, style_tags=[]),
+            hotel=Hotel(id=f"HT{i}", destination="Tokyo", name=f"Hotel {i}", price_per_night=float(50 + i * 10), stars=3, style_tags=[]),
             activities=[],
             total_cost=float(i * 200),
             match_score=float(i) / num_itineraries,  # Increasing scores
@@ -156,8 +156,8 @@ def test_booking_id_is_valid_uuid(num_activities):
     ]
     
     selected_itinerary = Itinerary(
-        flight=Flight(id="FL1", destination="Tokyo", price=1000.0, airline="JAL"),
-        hotel=Hotel(id="HT1", destination="Tokyo", name="Tokyo Hotel", price_per_night=200.0, stars=5),
+        flight=Flight(id="FL1", destination="Tokyo", price=1000.0, airline="JAL", duration_hours=12.0, style_tags=[]),
+        hotel=Hotel(id="HT1", destination="Tokyo", name="Tokyo Hotel", price_per_night=200.0, stars=5, style_tags=[]),
         activities=activities,
         total_cost=1000.0 + 200.0 * 7 + sum(a.price for a in activities),
         match_score=0.9,
@@ -228,8 +228,8 @@ def test_confirmation_state_is_terminal():
         "booking": BookingConfirmation(
             booking_id=str(uuid.uuid4()),
             itinerary=Itinerary(
-                flight=Flight(id="FL1", destination="Tokyo", price=1000.0, airline="JAL"),
-                hotel=Hotel(id="HT1", destination="Tokyo", name="Tokyo Hotel", price_per_night=200.0, stars=5),
+                flight=Flight(id="FL1", destination="Tokyo", price=1000.0, airline="JAL", duration_hours=12.0, style_tags=[]),
+                hotel=Hotel(id="HT1", destination="Tokyo", name="Tokyo Hotel", price_per_night=200.0, stars=5, style_tags=[]),
                 activities=[],
                 total_cost=2400.0,
                 match_score=0.9,

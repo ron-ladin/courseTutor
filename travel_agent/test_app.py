@@ -298,3 +298,67 @@ def test_initial_phase_is_onboard():
     assert initial["phase"] == "onboard"
     assert initial["backtrack_count"] == 0
     assert initial["messages"] == []
+
+
+# ── Property 2: Budget validation rejects non-positive values ─────────────────
+
+@given(st.one_of(
+    st.floats(max_value=0.0, allow_nan=False),
+    st.just(0.0),
+))
+def test_budget_validation_rejects_non_positive(budget: float):
+    """TravelRequest raises ValidationError for zero or negative budgets (Property 2)."""
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        TravelRequest(
+            destination="Tokyo",
+            departure_date=date(2025, 3, 10),
+            return_date=date(2025, 3, 17),
+            budget=budget,
+            travel_style=[],
+        )
+
+
+# ── Property 3: Date validation rejects invalid ranges ───────────────────────
+
+@given(
+    dep=st.dates(min_value=date(2025, 1, 1), max_value=date(2026, 12, 30)),
+    delta=st.integers(min_value=0, max_value=365),
+)
+def test_date_validation_rejects_return_not_after_departure(dep, delta):
+    """TravelRequest raises ValidationError when return_date <= departure_date (Property 3)."""
+    from pydantic import ValidationError
+    ret = date.fromordinal(dep.toordinal() - delta)  # ret <= dep
+    with pytest.raises(ValidationError):
+        TravelRequest(
+            destination="Tokyo",
+            departure_date=dep,
+            return_date=ret,
+            budget=1000.0,
+            travel_style=[],
+        )
+
+
+# ── Property 4: Mock data completeness ───────────────────────────────────────
+
+def test_mock_data_completeness():
+    """Every destination has >=2 flights, >=2 hotels, >=3 activities, all with price and tags (Property 4)."""
+    from mock_server import _DATA
+    for dest, data in _DATA.items():
+        flights = data.get("flights", [])
+        hotels = data.get("hotels", [])
+        activities = data.get("activities", [])
+
+        assert len(flights) >= 2, f"{dest}: need >=2 flights"
+        assert len(hotels) >= 2, f"{dest}: need >=2 hotels"
+        assert len(activities) >= 3, f"{dest}: need >=3 activities"
+
+        for f in flights:
+            assert f.price > 0, f"{dest} flight {f.id}: price must be > 0"
+            assert len(f.style_tags) > 0, f"{dest} flight {f.id}: style_tags must be non-empty"
+        for h in hotels:
+            assert h.price_per_night > 0, f"{dest} hotel {h.id}: price must be > 0"
+            assert len(h.style_tags) > 0, f"{dest} hotel {h.id}: style_tags must be non-empty"
+        for a in activities:
+            assert a.price >= 0, f"{dest} activity {a.id}: price must be >= 0"
+            assert len(a.style_tags) > 0, f"{dest} activity {a.id}: style_tags must be non-empty"
