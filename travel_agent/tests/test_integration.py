@@ -48,6 +48,11 @@ def test_onboarding_flow_complete():
     # Step 2: Answer destination
     state["messages"].append({"role": "user", "content": "Tokyo"})
     state = onboard_node(state)
+    assert "interesting" in state["messages"][-1]["content"].lower() or "restaurants" in state["messages"][-1]["content"].lower()
+
+    # Step 2.5: Answer activity interests
+    state["messages"].append({"role": "user", "content": "luxury, adventure"})
+    state = onboard_node(state)
     assert "departure" in state["messages"][-1]["content"].lower() or "depart" in state["messages"][-1]["content"].lower()
     
     # Step 3: Answer departure date
@@ -63,15 +68,10 @@ def test_onboarding_flow_complete():
     # Step 5: Answer budget
     state["messages"].append({"role": "user", "content": "5000"})
     state = onboard_node(state)
-    assert "style" in state["messages"][-1]["content"].lower()
-    
-    # Step 6: Answer travel style
-    state["messages"].append({"role": "user", "content": "luxury, adventure"})
-    state = onboard_node(state)
-    # onboard_node now shows summary and awaits confirmation
+    assert "start planning" in state["messages"][-1]["content"].lower() or "should" in state["messages"][-1]["content"].lower()
     assert state["phase"] == "onboard"
 
-    # Step 7: Confirm with "yes"
+    # Step 6: Confirm with "yes"
     state["messages"].append({"role": "user", "content": "yes"})
     state = onboard_node(state)
     assert state["phase"] == "plan"

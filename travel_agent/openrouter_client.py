@@ -45,7 +45,7 @@ def _fallback_autonomous_response(chat_history: list[dict], current_preferences:
             latest_user = msg["content"].strip()
             break
 
-    required = ("destination", "departure_date", "return_date", "budget")
+    required = ("destination", "departure_date", "return_date", "travel_style", "budget")
     missing = [field for field in required if field not in preferences]
 
     if latest_user.lower() in {"yes", "y", "ok", "confirm", "go ahead", "start planning"} and not missing:
@@ -57,6 +57,32 @@ def _fallback_autonomous_response(chat_history: list[dict], current_preferences:
     if latest_user and missing:
         if "destination" in preferences and latest_user.lower() in {"not a number", "invalid budget", "bad budget"}:
             return {"extracted_data": preferences, "agent_status": "COLLECTING", "response_to_user": "Please send a valid budget as a number, for example 2500."}
+        looks_like_date = bool(
+            any(month in latest_user.lower() for month in ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
+            or any(sep in latest_user for sep in ["-", "/", "."])
+            or any(word in latest_user.lower() for word in ["date", "depart", "return", "fly"])
+        )
+        looks_like_budget = bool(
+            "$" in latest_user
+            or "budget" in latest_user.lower()
+            or "dollar" in latest_user.lower()
+            or "usd" in latest_user.lower()
+            or latest_user.replace(",", "").strip().isdigit()
+        )
+        if (
+            "destination" in preferences
+            and "travel_style" not in preferences
+            and not looks_like_date
+            and not looks_like_budget
+        ):
+            preferences["travel_style"] = latest_user
+            missing = [field for field in required if field not in preferences]
+            return {
+                "extracted_data": preferences,
+                "agent_status": "COLLECTING",
+                "response_to_user": "Great, I will shape the trip around that. What date would you like to depart?",
+            }
+
         field = missing[0]
         if field == "destination":
             supported = {name.lower(): name for name in STATIC_DATA.keys()}
@@ -64,6 +90,14 @@ def _fallback_autonomous_response(chat_history: list[dict], current_preferences:
             preferences["destination"] = matched or latest_user
         elif field in {"departure_date", "return_date"}:
             preferences[field] = latest_user
+        elif field == "travel_style":
+            if looks_like_budget:
+                return {
+                    "extracted_data": preferences,
+                    "agent_status": "COLLECTING",
+                    "response_to_user": "Before we talk budget, what sounds most interesting: restaurants, museums, sightseeing, nightlife, nature, or something more relaxed?",
+                }
+            preferences["travel_style"] = latest_user
         elif field == "budget":
             cleaned = latest_user.lower().replace("$", "").replace(",", "").replace("usd", "").replace("dollars", "").strip()
             try:
@@ -71,21 +105,16 @@ def _fallback_autonomous_response(chat_history: list[dict], current_preferences:
             except ValueError:
                 return {"extracted_data": preferences, "agent_status": "COLLECTING", "response_to_user": "Please send a valid budget as a number, for example 2500."}
 
-    if latest_user and not missing and "travel_style" not in preferences:
-        preferences["travel_style"] = latest_user
-
     missing = [field for field in required if field not in preferences]
     if missing:
         prompts = {
             "destination": "What destination city would you like to travel to? Please choose one of the SkySwift demo cities.",
             "departure_date": "Great. What date would you like to depart? You can write it naturally, like 2026-8-15, 15/8/26, or April 26.",
             "return_date": "And when should you return? You can write it naturally too, like 20/8/26 or August 20.",
+            "travel_style": "Before we talk budget, what sounds most interesting: restaurants, museums, sightseeing, nightlife, nature, or something more relaxed?",
             "budget": "What total budget should I keep in mind for the whole trip, in USD?",
         }
         return {"extracted_data": preferences, "agent_status": "COLLECTING", "response_to_user": prompts[missing[0]]}
-
-    if "travel_style" not in preferences:
-        return {"extracted_data": preferences, "agent_status": "COLLECTING", "response_to_user": "What travel style should this feel like: food, culture, adventure, luxury, romance, nature, or budget-friendly?"}
 
     return {
         "extracted_data": preferences,
@@ -125,7 +154,10 @@ def generate_autonomous_response(
         "YYYY-MM-DD dates and ask them to confirm. You may also capture travel_style when the user mentions it.\n\n"
         "Supported demo destinations are: " + supported_destinations + ". "
         "If the user asks for an unsupported destination, explain that this demo currently supports only those places.\n\n"
-        "When the user chooses a supported destination, briefly suggest 2-3 things they could do there before asking for budget. "
+        "When the user chooses a supported destination and has not shared travel_style/interests yet, do not ask for budget in the same message. "
+        "First suggest 2-3 things they could do there, then ask what kind of activities sound interesting: restaurants, museums, sightseeing, nightlife, nature, or relaxed experiences. "
+        "Never combine activity suggestions/interests and budget in the same response. "
+        "Only ask for budget after the customer has shared dates and some preference/interests. "
         "Use only general suggestions or activities from the supported demo context; do not invent prices or availability at this stage.\n\n"
         "Always return ONLY valid JSON with exactly these three top-level keys:\n"
         "1. extracted_data: an object containing all known trip fields so far. Use keys: "

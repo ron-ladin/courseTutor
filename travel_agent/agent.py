@@ -181,6 +181,13 @@ def _destination_teaser(destination: str) -> str:
     )
 
 
+def _interest_question(destination: str) -> str:
+    return (
+        f"What sounds most interesting for {destination}: restaurants, museums, sightseeing, "
+        "nightlife, nature, or something more relaxed?"
+    )
+
+
 def _coerce_budget(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
@@ -566,6 +573,14 @@ def onboard_node(state: AgentState) -> AgentState:
     messages = list(state.get("messages", []))
     travel_request = dict(state.get("travel_request", {}))
     previous_destination = travel_request.get("destination")
+    latest_user = next(
+        (
+            str(message.get("content", "")).strip()
+            for message in reversed(messages)
+            if message.get("role") == "user"
+        ),
+        "",
+    )
 
     llm_response = generate_autonomous_response(messages, travel_request)
 
@@ -584,13 +599,21 @@ def onboard_node(state: AgentState) -> AgentState:
     response_to_user = str(llm_response.get("response_to_user", "")).strip()
     if (
         current_destination
-        and current_destination != previous_destination
         and travel_request.get(suggestion_marker) != current_destination
+        and "budget" not in travel_request
+        and "travel_style" not in travel_request
+        and bool(latest_user)
+        and latest_user.lower() not in {"not a number", "invalid budget", "bad budget"}
+        and str(current_destination) in STATIC_DATA
     ):
         teaser = _destination_teaser(str(current_destination))
-        if teaser:
-            response_to_user = f"{teaser}\n\n{response_to_user}" if response_to_user else teaser
-            travel_request[suggestion_marker] = current_destination
+        response_to_user = (
+            f"{teaser}\n\n{_interest_question(str(current_destination))}"
+            if teaser
+            else _interest_question(str(current_destination))
+        )
+        travel_request[suggestion_marker] = current_destination
+        agent_status = "COLLECTING"
 
     if response_to_user:
         messages.append({"role": "assistant", "content": response_to_user})

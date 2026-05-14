@@ -81,8 +81,9 @@ def test_11_1_full_graph_onboard_to_rank():
             for m in state["messages"] if m["role"] == "assistant"
         )
 
-        # Answer each onboarding question
-        for answer in ["Tokyo", "2025-06-01", "2025-06-08", "2000", "adventure, culture"]:
+        # Answer each onboarding question. Interests come before budget so the
+        # agent can suggest destination ideas before talking money.
+        for answer in ["Tokyo", "adventure, culture", "2025-06-01", "2025-06-08", "2000"]:
             state["messages"].append({"role": "user", "content": answer})
             state = graph.invoke(state)
 

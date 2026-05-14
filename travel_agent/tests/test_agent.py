@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import date
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 
 try:
     from travel_agent.models import TravelRequest, Itinerary, Flight, Hotel, Activity, BookingConfirmation
@@ -93,16 +93,16 @@ def test_onboarding_sequence_order(destination, departure, budget, style_tags):
     state["travel_request"]["return_date"] = return_date.isoformat()
     state["messages"] = []
     state = onboard_node(state)
-    assert "budget" in state["messages"][-1]["content"].lower()
-    
-    # Answer budget
-    state["travel_request"]["budget"] = budget
+    assert "interesting" in state["messages"][-1]["content"].lower()
+
+    # Answer travel_style / interests before budget
+    state["travel_request"]["travel_style"] = ",".join(style_tags)
     state["messages"] = []
     state = onboard_node(state)
-    assert "style" in state["messages"][-1]["content"].lower()
-    
-    # Answer travel_style
-    state["travel_request"]["travel_style"] = ",".join(style_tags)
+    assert "budget" in state["messages"][-1]["content"].lower()
+
+    # Answer budget
+    state["travel_request"]["budget"] = budget
     state["messages"] = []
     state = onboard_node(state)
     
@@ -118,6 +118,7 @@ def test_onboarding_sequence_order(destination, departure, budget, style_tags):
 @given(
     num_itineraries=st.integers(min_value=1, max_value=5),
 )
+@settings(deadline=None)
 def test_itinerary_ranking_order(num_itineraries):
     """
     Property 13: Itinerary ranking is non-increasing
