@@ -3,8 +3,25 @@ import streamlit as st
 from agent import AgentState, build_graph
 from models import Itinerary
 
-st.set_page_config(page_title="Travel Planning Agent", layout="centered")
-st.title("Travel Planning Agent")
+st.set_page_config(page_title="Travel Planning Agent", layout="centered", page_icon="✈️")
+st.title("✈️ Travel Planning Agent")
+
+# ── sidebar: demo guide ───────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("Demo Scenarios")
+    st.markdown(
+        "**Tokyo (happy path)**\n"
+        "- Budget: $2,000+\n"
+        "- Style: adventure, culture\n\n"
+        "**Paris (backtracking demo)**\n"
+        "- Budget: $1,500 ← triggers backtrack!\n"
+        "- Style: romance\n"
+        "- All Paris hotels > $1,500/night\n"
+        "- Watch the Reasoning panel fill up\n\n"
+        "**Bali / New York** — standard paths"
+    )
+    st.divider()
+    st.caption("Start the mock server before using:\n`uvicorn mock_server:app --port 8000`")
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "graph" not in st.session_state:
@@ -40,15 +57,18 @@ for msg in state["messages"]:
         st.write(msg["content"])
 
 
-# ── Reasoning panel ───────────────────────────────────────────────────────────
+# ── reasoning panel ───────────────────────────────────────────────────────────
 with st.expander("Agent Reasoning", expanded=False):
     if state["reasoning_log"]:
         for entry in state["reasoning_log"]:
-            st.write(f"• {entry}")
+            if "backtrack" in entry.lower() or "fallback" in entry.lower():
+                st.warning(f"⚠ {entry}")
+            elif entry.startswith("GET "):
+                st.code(entry, language=None)
+            else:
+                st.write(f"• {entry}")
     else:
         st.caption("No reasoning steps yet.")
-    if state["phase"] == "plan":
-        st.write("Planning in progress...")
 
 
 # ── Itinerary cards (rank phase) ──────────────────────────────────────────────
@@ -109,17 +129,134 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
 # ── Done: booking confirmation ────────────────────────────────────────────────
 if state["phase"] == "done" and state["booking"]:
     st.divider()
-    booking = state["booking"]
-    st.success(f"Booking Confirmed — Flight ID: `{booking.booking_id}`")
-    if booking.hotel_booking_id:
-        st.info(f"Hotel ID: `{booking.hotel_booking_id}`")
-    for bid in booking.activity_booking_ids:
-        st.info(f"Activity ID: `{bid}`")
+    st.success(f"Booking Confirmed — ID: `{state['booking'].booking_id}`")
 
 
-# ── Chat input ────────────────────────────────────────────────────────────────
-# Only show during phases that expect text input
-if state["phase"] in ("onboard", "collect"):
+# ── stub-mode helpers ─────────────────────────────────────────────────────────
+
+def _run_planning(state: AgentState) -> None:
+    """Call the real planner directly (used when build_graph() is still a stub)."""
+    from data_client import DataClient
+    from planner import run_planning_loop
+
+    tr = state["travel_request"]
+    try:
+        request = TravelRequest(
+            destination=tr["destination"],
+            departure_date=date_type.fromisoformat(tr["departure_date"]),
+            return_date=date_type.fromisoformat(tr["return_date"]),
+            budget=float(tr["budget"]),
+            travel_style=tr.get("travel_style", []),
+        )
+        state["confirmed_request"] = request
+        log: list[str] = state["reasoning_log"]
+        itineraries = run_planning_loop(request, DataClient(), log)
+        state["reasoning_log"] = log
+
+        if not itineraries:
+            state["messages"].append({
+                "role": "assistant",
+                "content": "Unable to find a matching itinerary. Please restart with a higher budget.",
+            })
+            state["phase"] = "onboard"
+            state["travel_request"] = {}
+        else:
+            state["itineraries"] = itineraries
+            state["phase"] = "rank"
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"Found {len(itineraries)} itinerary option(s). Review and select one below.",
+            })
+    except ConnectionError as e:
+        state["messages"].append({"role": "assistant", "content": str(e)})
+        state["phase"] = "onboard"
+    except Exception as e:
+        state["messages"].append({"role": "assistant", "content": f"Planning error: {e}"})
+        state["phase"] = "onboard"
+
+
+def _process_stub(state: AgentState, prompt: str) -> None:
+    """Sequential onboarding flow used while build_graph() returns None."""
+    tr = state["travel_request"]
+    reply: str
+
+    if "destination" not in tr:
+        valid = ["Tokyo", "Paris", "Bali", "New York"]
+        dest = next((v for v in valid if v.lower() == prompt.strip().lower()), None)
+        if dest:
+            tr["destination"] = dest
+            reply = "What is your departure date? (YYYY-MM-DD)"
+        else:
+            reply = f"Please choose from: {', '.join(valid)}."
+
+    elif "departure_date" not in tr:
+        try:
+            date_type.fromisoformat(prompt.strip())
+            tr["departure_date"] = prompt.strip()
+            reply = "What is your return date? (YYYY-MM-DD)"
+        except ValueError:
+            reply = "Please enter a valid date in YYYY-MM-DD format."
+
+    elif "return_date" not in tr:
+        try:
+            ret = date_type.fromisoformat(prompt.strip())
+            dep = date_type.fromisoformat(tr["departure_date"])
+            if ret <= dep:
+                reply = "Return date must be after departure date. Please re-enter."
+            else:
+                tr["return_date"] = prompt.strip()
+                reply = "What is your total budget in USD?"
+        except ValueError:
+            reply = "Please enter a valid date in YYYY-MM-DD format."
+
+    elif "budget" not in tr:
+        try:
+            budget = float(prompt.strip().replace("$", "").replace(",", ""))
+            if budget <= 0:
+                reply = "Please enter a positive number for your budget."
+            else:
+                tr["budget"] = budget
+                reply = (
+                    f"What travel styles do you prefer? "
+                    f"(comma-separated from: {', '.join(_VALID_STYLES)})"
+                )
+        except ValueError:
+            reply = "Please enter a positive number for your budget."
+
+    elif "travel_style" not in tr:
+        styles = [s.strip().lower() for s in prompt.split(",") if s.strip().lower() in _VALID_STYLES]
+        if not styles:
+            reply = f"Please choose at least one from: {', '.join(_VALID_STYLES)}."
+        else:
+            tr["travel_style"] = styles
+            reply = (
+                f"Here's your trip summary:\n"
+                f"- Destination: {tr['destination']}\n"
+                f"- Dates: {tr['departure_date']} → {tr['return_date']}\n"
+                f"- Budget: ${tr['budget']:.0f}\n"
+                f"- Style: {', '.join(styles)}\n\n"
+                f"Shall I proceed with planning? (yes / no)"
+            )
+
+    elif prompt.strip().lower() in ("yes", "y"):
+        state["travel_request"] = tr
+        state["messages"].append({"role": "assistant", "content": "On it! Planning your trip..."})
+        _run_planning(state)
+        return
+
+    elif prompt.strip().lower() in ("no", "n"):
+        state["travel_request"] = {}
+        reply = "No problem! Where would you like to travel? (Tokyo, Paris, Bali, New York)"
+
+    else:
+        reply = "Please reply with 'yes' to proceed or 'no' to start over."
+
+    state["travel_request"] = tr
+    state["messages"].append({"role": "assistant", "content": reply})
+
+
+# ── chat input ────────────────────────────────────────────────────────────────
+if state["phase"] != "done":
     if prompt := st.chat_input("Type your response..."):
         state["messages"].append({"role": "user", "content": prompt})
         try:
