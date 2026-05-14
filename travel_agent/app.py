@@ -499,8 +499,7 @@ def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
         ):
             state["selected_itinerary"] = itin
             state["phase"] = "collect"
-            new_state = graph.invoke(state)
-            st.session_state.state = new_state
+            st.session_state.state = state
             st.rerun()
 
 
@@ -599,6 +598,133 @@ if state["phase"] == "rank":
         st.write("")
         if st.button("← Change Trip Details", type="secondary"):
             st.session_state.state = _empty_state()
+            st.rerun()
+
+
+# ── Collect phase: Payment & Passenger details ────────────────────────────────
+if state["phase"] == "collect" and state["selected_itinerary"]:
+    itin: Itinerary = state["selected_itinerary"]
+    st.divider()
+    st.markdown(
+        "<h3 style='font-size:1.2rem;font-weight:800;margin-bottom:14px'>Complete Your Booking</h3>",
+        unsafe_allow_html=True,
+    )
+
+    # Order summary reminder
+    with st.container(border=True):
+        st.markdown("<div style='font-size:0.85rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em'>📋 Trip Summary</div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.write(f"✈️ **{itin.flight.airline}**\n${itin.flight.price:,.0f}")
+        with c2:
+            st.write(f"🏨 **{itin.hotel.name}**\n${itin.hotel.price_per_night:,.0f}/night")
+        with c3:
+            st.write(f"💰 **Total**\n${itin.total_cost:,.0f}")
+
+    st.write("")
+    st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px'>Passenger Information</div>", unsafe_allow_html=True)
+
+    p = state.get("passenger_info", {})
+    c1, c2 = st.columns(2)
+    with c1:
+        full_name = st.text_input(
+            "Full Name",
+            value=p.get("full_name", ""),
+            placeholder="John Doe",
+            key="passenger_name",
+        )
+    with c2:
+        passport = st.text_input(
+            "Passport Number",
+            value=p.get("passport_number", ""),
+            placeholder="AB123456789",
+            key="passenger_passport",
+        )
+
+    st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px;margin-top:16px'>Contact Information</div>", unsafe_allow_html=True)
+
+    c = state.get("contact_info", {})
+    c1, c2 = st.columns(2)
+    with c1:
+        email = st.text_input(
+            "Email",
+            value=c.get("email", ""),
+            placeholder="you@example.com",
+            key="contact_email",
+        )
+    with c2:
+        phone = st.text_input(
+            "Phone Number",
+            value=c.get("phone", ""),
+            placeholder="+1 (555) 123-4567",
+            key="contact_phone",
+        )
+
+    st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px;margin-top:16px'>Payment Information</div>", unsafe_allow_html=True)
+
+    pay = state.get("payment_info", {})
+    st.info("💳 Using demo card — any valid format accepted for demo purposes")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        card_num = st.text_input(
+            "Card Number",
+            value=pay.get("card_number", ""),
+            placeholder="4532 1234 5678 9010",
+            key="payment_card",
+        )
+    with c2:
+        card_exp = st.text_input(
+            "Expiry (MM/YY)",
+            value=pay.get("card_expiry", ""),
+            placeholder="12/26",
+            key="payment_expiry",
+        )
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        card_name = st.text_input(
+            "Cardholder Name",
+            value=pay.get("cardholder_name", ""),
+            placeholder="JOHN DOE",
+            key="payment_name",
+        )
+    with c2:
+        card_cvc = st.text_input(
+            "CVC",
+            value=pay.get("card_cvc", ""),
+            placeholder="123",
+            key="payment_cvc",
+            type="password",
+        )
+
+    st.write("")
+
+    # Update state with form values
+    state["passenger_info"] = {"full_name": full_name, "passport_number": passport}
+    state["contact_info"] = {"email": email, "phone": phone}
+    last4 = card_num.replace(" ", "")[-4:] if card_num else "0000"
+    state["payment_info"] = {
+        "card_number": card_num,
+        "card_expiry": card_exp,
+        "cardholder_name": card_name,
+        "card_cvc": card_cvc,
+        "card_last4": last4,
+    }
+
+    col_next, col_back = st.columns([3, 1])
+    with col_next:
+        if st.button("→ Continue to Confirmation", type="primary", use_container_width=True):
+            if full_name and email and card_num:
+                state["phase"] = "confirm"
+                st.session_state.state = state
+                st.rerun()
+            else:
+                st.error("Please fill in full name, email, and card number")
+    with col_back:
+        if st.button("← Back", use_container_width=True):
+            state["phase"] = "rank"
+            st.session_state.state = state
             st.rerun()
 
 
