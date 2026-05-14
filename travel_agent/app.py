@@ -1,5 +1,11 @@
 from datetime import date as date_type
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import streamlit as st
 
 try:
