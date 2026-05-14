@@ -1,8 +1,4 @@
 """Property tests for Dev 4 (app.py / UI layer)."""
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(__file__))
 
 from datetime import date
 
@@ -10,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from models import Activity, Flight, Hotel, Itinerary, TravelRequest
+from travel_agent.models import Activity, Flight, Hotel, Itinerary, TravelRequest
 
 # ── shared strategies ─────────────────────────────────────────────────────────
 
@@ -103,7 +99,7 @@ def test_itinerary_card_field_completeness(itin: Itinerary):
 
 def test_reasoning_log_is_list():
     """reasoning_log in AgentState is always a list (structural check)."""
-    from agent import AgentState
+    from travel_agent.agent import AgentState
 
     state: AgentState = {
         "messages": [],
@@ -121,28 +117,28 @@ def test_reasoning_log_is_list():
 
 class _InMemoryDataClient:
     """Reads directly from mock_server._DATA — no HTTP server needed."""
-    from mock_server import _DATA as _mock_data
+    from travel_agent.data.mock_server import _DATA as _mock_data
 
     def get_flights(self, destination: str, date: str):
-        from mock_server import _DATA
+        from travel_agent.data.mock_server import _DATA
         return list(_DATA.get(destination, {}).get("flights", []))
 
     def get_hotels(self, destination: str, checkin: str, checkout: str, max_price: float = 99999):
-        from mock_server import _DATA
+        from travel_agent.data.mock_server import _DATA
         return [h for h in _DATA.get(destination, {}).get("hotels", []) if h.price_per_night <= max_price]
 
     def get_activities(self, destination: str):
-        from mock_server import _DATA
+        from travel_agent.data.mock_server import _DATA
         return list(_DATA.get(destination, {}).get("activities", []))
 
     def destinations(self) -> list[str]:
-        from mock_server import _DATA
+        from travel_agent.data.mock_server import _DATA
         return list(_DATA.keys())
 
 
 def test_reasoning_log_grows_after_planning():
     """Reasoning log is non-empty and grows after a real planning run."""
-    from planner import run_planning_loop
+    from travel_agent.planner import run_planning_loop
 
     request = TravelRequest(
         destination="Tokyo",
@@ -162,7 +158,7 @@ def test_reasoning_log_grows_after_planning():
 
 def test_tokyo_happy_path_produces_itineraries():
     """Full planning run for Tokyo returns 1-3 itineraries within budget."""
-    from planner import run_planning_loop
+    from travel_agent.planner import run_planning_loop
 
     budget = 1500.0
     request = TravelRequest(
@@ -185,7 +181,7 @@ def test_tokyo_happy_path_produces_itineraries():
 
 def test_paris_low_budget_triggers_partial_fallback():
     """Paris with a budget below hotel prices triggers the backtrack + partial fallback path."""
-    from planner import run_planning_loop
+    from travel_agent.planner import run_planning_loop
 
     request = TravelRequest(
         destination="Paris",
@@ -205,7 +201,7 @@ def test_paris_low_budget_triggers_partial_fallback():
 
 def test_itineraries_sorted_by_match_score_descending():
     """Returned itineraries are ranked highest score first (Property 13)."""
-    from planner import run_planning_loop
+    from travel_agent.planner import run_planning_loop
 
     request = TravelRequest(
         destination="Tokyo",
@@ -232,7 +228,7 @@ _UUID4_RE = re.compile(
 
 def test_booking_id_is_valid_uuid4():
     """Generated booking ID matches UUID v4 format (Property 16)."""
-    from models import BookingConfirmation, Flight, Hotel, Itinerary
+    from travel_agent.models import BookingConfirmation, Flight, Hotel, Itinerary
 
     flight = Flight(id="f1", destination="Tokyo", price=650.0,
                     airline="ANA", duration_hours=14.0, style_tags=["culture"])
@@ -260,7 +256,7 @@ def test_booking_id_always_unique(n: int):
 
 def test_initial_state_has_all_agent_state_keys():
     """The initial state dict covers every key in AgentState."""
-    from agent import AgentState
+    from travel_agent.agent import AgentState
 
     required_keys = {"messages", "travel_request", "confirmed_request",
                      "itineraries", "selected_itinerary", "booking",
@@ -282,7 +278,7 @@ def test_initial_state_has_all_agent_state_keys():
 
 def test_initial_phase_is_onboard():
     """App always starts in the onboard phase."""
-    from agent import AgentState
+    from travel_agent.agent import AgentState
 
     initial: AgentState = {
         "messages": [],
@@ -343,7 +339,7 @@ def test_date_validation_rejects_return_not_after_departure(dep, delta):
 
 def test_mock_data_completeness():
     """Every destination has >=2 flights, >=2 hotels, >=3 activities, all with price and tags (Property 4)."""
-    from mock_server import _DATA
+    from travel_agent.data.mock_server import _DATA
     for dest, data in _DATA.items():
         flights = data.get("flights", [])
         hotels = data.get("hotels", [])

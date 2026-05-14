@@ -57,8 +57,10 @@ def test_tokyo_hotel_search_respects_max_price():
     assert all(hotel["price_per_night"] <= 200 for hotel in hotels)
 
 
-def test_destinations_are_exactly_the_required_four():
+def test_destinations_include_demo_cities_and_country_options():
     response = client.get("/destinations")
 
     assert response.status_code == 200
-    assert set(response.json()["destinations"]) == {"Tokyo", "Paris", "Bali", "New York"}
+    destinations = set(response.json()["destinations"])
+    assert {"Tokyo", "Paris", "Bali", "New York"}.issubset(destinations)
+    assert {"Japan", "France", "Italy", "Greece", "Thailand", "Spain", "United Kingdom", "Mexico", "Israel"}.issubset(destinations)

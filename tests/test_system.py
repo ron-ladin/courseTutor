@@ -9,8 +9,6 @@ The MockDataClient replaces real HTTP calls in planner/agent unit tests.
 """
 from __future__ import annotations
 
-import sys
-import os
 from datetime import date, timedelta
 from typing import Any
 
@@ -18,15 +16,12 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-# Allow imports from travel_agent/ when pytest runs from the repo root
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "travel_agent"))
-
-from mock_server import app, _BOOKINGS
-from models import (
+from travel_agent.data.mock_server import app, _BOOKINGS
+from travel_agent.models import (
     Activity, BookingConfirmation, BookingRequest, ContactInfo, Flight,
     Hotel, Itinerary, PassengerInfo, PaymentInfo, TravelRequest,
 )
-from planner import (
+from travel_agent.planner import (
     aggregate_itinerary_tags, compute_raw_score, normalize_scores,
     run_planning_loop,
 )
@@ -210,11 +205,12 @@ class TestServerSearch:
         assert r.status_code == 200
         assert len(r.json()) >= 3
 
-    def test_destinations_lists_four(self):
+    def test_destinations_include_required_demo_and_country_options(self):
         r = client.get("/destinations")
         assert r.status_code == 200
         dests = r.json()["destinations"]
-        assert set(dests) == {"Tokyo", "Paris", "Bali", "New York"}
+        assert {"Tokyo", "Paris", "Bali", "New York"}.issubset(set(dests))
+        assert {"Japan", "France", "Italy", "Greece", "Thailand", "Spain", "United Kingdom", "Mexico", "Israel"}.issubset(set(dests))
 
     # Negative
     def test_unknown_destination_returns_empty(self):
