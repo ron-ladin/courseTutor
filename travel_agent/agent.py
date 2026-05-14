@@ -665,7 +665,7 @@ def plan_node(state: AgentState) -> AgentState:
         state["phase"] = "rank"
 
         msg = (
-            f"I found {len(itineraries)} itinerary option(s). Here are the best matches."
+            f"Done. I built {len(itineraries)} clean option(s) for you below."
             if itineraries
             else "No itineraries found. Please try a higher budget."
         )
@@ -716,20 +716,10 @@ def rank_node(state: AgentState) -> AgentState:
     state["reasoning_log"] = reasoning_log
     state["phase"] = "rank"
 
-    ai_explanation = build_trip_explanation(confirmed, itineraries)
-    if ai_explanation:
-        messages.append({"role": "assistant", "content": ai_explanation})
-        reasoning_log.append(
-            "OpenRouter generated a grounded customer-facing answer from mock itinerary data."
-        )
-    else:
-        messages.append({
-            "role": "assistant",
-            "content": (
-                "I ranked the best itinerary options below. "
-                "Pick the one that feels right, and I will continue the booking flow."
-            ),
-        })
+    messages.append({
+        "role": "assistant",
+        "content": "Here are the 3 best packages I found. Pick one and I will continue the booking flow.",
+    })
 
     state["messages"] = messages
     state["reasoning_log"] = reasoning_log

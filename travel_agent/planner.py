@@ -45,24 +45,35 @@ def _greedy_activities(
     request: TravelRequest,
     budget: float,
     reasoning_log: list[str],
+    variant: int = 0,
+    max_items: int = 4,
 ) -> list[Activity]:
     """
-    Greedy knapsack: pick activities by match score descending, then price
-    ascending for ties. Stops as soon as the next item would exceed budget.
+    Pick a compact activity set for one option.
+
+    The list is still preference-aware, but each itinerary starts from a
+    different point in the ranked activity list so the three options feel like
+    meaningfully different trips instead of clones with different flights.
     """
     activities = client.get_activities(request.destination)
     activities.sort(
         key=lambda a: (-compute_raw_score(a.style_tags, request.travel_style), a.price)
     )
+    if activities:
+        shift = variant % len(activities)
+        activities = activities[shift:] + activities[:shift]
+
     selected: list[Activity] = []
     remaining = budget
     for a in activities:
+        if len(selected) >= max_items:
+            break
         if a.price <= remaining:
             selected.append(a)
             remaining -= a.price
 
     reasoning_log.append(
-        f"Activities: selected {len(selected)} item(s) "
+        f"Activities option {variant + 1}: selected {len(selected)} item(s) "
         f"(${sum(a.price for a in selected):.0f}) within ${budget:.0f} remaining budget."
     )
     return selected
@@ -152,7 +163,10 @@ def run_planning_loop(
                 best_hotel = min(all_hotels, key=lambda h: h.price_per_night)
                 hotel_cost = best_hotel.price_per_night * nights
                 budget_for_activities = max(remaining_after_flight - hotel_cost, 0.0)
-                activities = _greedy_activities(client, request, budget_for_activities, reasoning_log)
+                variant = len(itineraries)
+                activities = _greedy_activities(
+                    client, request, budget_for_activities, reasoning_log, variant=variant
+                )
                 total_cost = flight.price + hotel_cost + sum(a.price for a in activities)
                 reasoning_log.append(
                     f"Partial fallback: {flight.airline} + {best_hotel.name} "
@@ -165,11 +179,14 @@ def run_planning_loop(
                 break
 
         else:
-            # Pick best hotel by match score; break ties by lowest price
-            best_hotel = max(
+            # Pick a strong hotel, but rotate among the best qualifying hotels
+            # so multiple itinerary cards are not visually identical.
+            ranked_hotels = sorted(
                 hotels,
-                key=lambda h: (compute_raw_score(h.style_tags, request.travel_style), -h.price_per_night),
+                key=lambda h: (-compute_raw_score(h.style_tags, request.travel_style), h.price_per_night),
             )
+            variant = len(itineraries)
+            best_hotel = ranked_hotels[variant % len(ranked_hotels)]
             hotel_cost = best_hotel.price_per_night * nights
             score = compute_raw_score(best_hotel.style_tags, request.travel_style)
 
@@ -181,7 +198,11 @@ def run_planning_loop(
             )
 
             activities = _greedy_activities(
-                client, request, remaining_after_flight - hotel_cost, reasoning_log
+                client,
+                request,
+                remaining_after_flight - hotel_cost,
+                reasoning_log,
+                variant=variant,
             )
             total_cost = flight.price + hotel_cost + sum(a.price for a in activities)
             itineraries.append(Itinerary(

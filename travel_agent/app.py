@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date as date_type
+from html import escape
+import time
 try:
     from dotenv import load_dotenv
 
@@ -19,6 +21,7 @@ except ImportError:
 
 
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
+_STREAM_DELAY_SECONDS = 0.025
 
 
 st.set_page_config(
@@ -292,11 +295,19 @@ def _inject_theme() -> None:
             color: #92400e;
         }
 
+        .option-title {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: var(--ink);
+            margin: 12px 0 10px;
+        }
+
         .stat-block {
             background: var(--soft);
             border: 1px solid var(--line);
             border-radius: 10px;
             padding: 14px 16px;
+            min-height: 104px;
         }
 
         .stat-label {
@@ -318,6 +329,43 @@ def _inject_theme() -> None:
             font-size: 0.78rem;
             color: var(--muted);
             margin-top: 2px;
+        }
+
+        .activity-area {
+            margin-top: 14px;
+        }
+
+        .activity-label {
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .activity-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .activity-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--line);
+            background: #ffffff;
+            border-radius: 999px;
+            padding: 7px 10px;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--ink-2);
+        }
+
+        .activity-chip small {
+            color: var(--teal);
+            font-weight: 800;
         }
 
         /* ── Buttons ── */
@@ -442,7 +490,11 @@ def _render_landing() -> None:
 
 
 def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
-    activities = ", ".join(a.name for a in itin.activities) or "None selected"
+    activities = itin.activities[:4]
+    activity_chips = "".join(
+        f'<span class="activity-chip">{escape(a.name)} <small>${a.price:,.0f}</small></span>'
+        for a in activities
+    ) or '<span class="activity-chip">No paid activities selected</span>'
     is_over = itin.is_partial_fallback and confirmed
     gap = (itin.total_cost - confirmed.budget) if is_over and confirmed else 0
 
@@ -458,12 +510,19 @@ def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
                 unsafe_allow_html=True,
             )
 
+        option_titles = ["Best value", "Balanced pick", "Comfort upgrade"]
+        title = option_titles[index] if index < len(option_titles) else "Trip package"
+        st.markdown(
+            f'<div class="option-title">Option {index + 1}: {title}</div>',
+            unsafe_allow_html=True,
+        )
+
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown(
                 f"""<div class="stat-block">
                   <div class="stat-label">✈️ Flight</div>
-                  <div class="stat-val">{itin.flight.airline}</div>
+                  <div class="stat-val">{escape(itin.flight.airline)}</div>
                   <div class="stat-sub">${itin.flight.price:,.0f} &nbsp;·&nbsp; {itin.flight.duration_hours}h</div>
                 </div>""",
                 unsafe_allow_html=True,
@@ -472,7 +531,7 @@ def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
             st.markdown(
                 f"""<div class="stat-block">
                   <div class="stat-label">🏨 Hotel</div>
-                  <div class="stat-val">{itin.hotel.name}</div>
+                  <div class="stat-val">{escape(itin.hotel.name)}</div>
                   <div class="stat-sub">${itin.hotel.price_per_night:,.0f}/night &nbsp;·&nbsp; {"⭐" * itin.hotel.stars}</div>
                 </div>""",
                 unsafe_allow_html=True,
@@ -487,8 +546,15 @@ def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
                 unsafe_allow_html=True,
             )
 
-        st.markdown(f"<div style='margin:10px 0 4px;font-size:0.82rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em'>🎯 Activities</div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='font-size:0.92rem;color:#334155'>{activities}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="activity-area">
+              <div class="activity-label">Activities included</div>
+              <div class="activity-list">{activity_chips}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.write("")
 
         if st.button(
@@ -513,12 +579,49 @@ def _has_user_message(state: AgentState) -> bool:
     return any(message.get("role") == "user" for message in state.get("messages", []))
 
 
+def _message_key(index: int, message: dict) -> str:
+    return f"{index}:{message.get('role', '')}:{message.get('content', '')}"
+
+
+def _stream_markdown(text: str) -> None:
+    placeholder = st.empty()
+    rendered = ""
+    chunks = text.split(" ")
+
+    for index, chunk in enumerate(chunks):
+        rendered += chunk
+        if index < len(chunks) - 1:
+            rendered += " "
+        placeholder.markdown(rendered)
+        time.sleep(_STREAM_DELAY_SECONDS)
+
+
+def _render_chat_history(messages: list[dict]) -> None:
+    animated_key = st.session_state.get("pending_stream_message_key")
+
+    st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
+    for index, msg in enumerate(messages):
+        role = msg.get("role", "assistant")
+        content = str(msg.get("content", ""))
+        key = _message_key(index, msg)
+
+        with st.chat_message(role):
+            if role == "assistant" and key == animated_key:
+                _stream_markdown(content)
+                st.session_state.pending_stream_message_key = None
+            else:
+                st.write(content)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 _inject_theme()
 
 if "graph" not in st.session_state:
     st.session_state.graph = build_graph()
 if "state" not in st.session_state:
     st.session_state.state = _empty_state()
+if "pending_stream_message_key" not in st.session_state:
+    st.session_state.pending_stream_message_key = None
 
 state: AgentState = st.session_state.state
 graph = st.session_state.graph
@@ -534,15 +637,11 @@ _render_topbar(show_reset=conversation_started or state["phase"] != "onboard")
 if not state["messages"]:
     _render_landing()
 else:
-    st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
-    for msg in state["messages"]:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
-    st.markdown("</div>", unsafe_allow_html=True)
+    _render_chat_history(state["messages"])
 
 
 # ── Reasoning panel ───────────────────────────────────────────────────────────
-if state["reasoning_log"]:
+if state["reasoning_log"] and st.session_state.get("show_debug_reasoning", False):
     with st.expander("🧠 Agent Reasoning", expanded=False):
         for entry in state["reasoning_log"]:
             low = entry.lower()
@@ -808,8 +907,19 @@ if state["phase"] in ("onboard", "collect"):
             with st.spinner("Thinking..."):
                 try:
                     new_state = graph.invoke(state)
+                    for index in range(len(new_state["messages"]) - 1, -1, -1):
+                        if new_state["messages"][index].get("role") == "assistant":
+                            st.session_state.pending_stream_message_key = _message_key(
+                                index,
+                                new_state["messages"][index],
+                            )
+                            break
                     st.session_state.state = new_state
                 except Exception as e:
                     state["messages"].append({"role": "assistant", "content": f"Error: {e}"})
+                    st.session_state.pending_stream_message_key = _message_key(
+                        len(state["messages"]) - 1,
+                        state["messages"][-1],
+                    )
                     st.session_state.state = state
         st.rerun()
