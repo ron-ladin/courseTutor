@@ -600,19 +600,71 @@ def _stream_markdown(text: str) -> None:
 def _render_chat_history(messages: list[dict]) -> None:
     animated_key = st.session_state.get("pending_stream_message_key")
 
-    st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+        .chat-message-user {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 16px;
+        }
+        .chat-message-assistant {
+            display: flex;
+            justify-content: flex-start;
+            margin-bottom: 16px;
+        }
+        .chat-bubble-user {
+            background: #0d9488;
+            color: white;
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 70%;
+            word-wrap: break-word;
+            border-bottom-right-radius: 4px;
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+        .chat-bubble-assistant {
+            background: #f0fdfa;
+            color: #0f172a;
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 70%;
+            word-wrap: break-word;
+            border-bottom-left-radius: 4px;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            border: 1px solid #99f6e4;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     for index, msg in enumerate(messages):
         role = msg.get("role", "assistant")
         content = str(msg.get("content", ""))
         key = _message_key(index, msg)
 
-        with st.chat_message(role):
-            if role == "assistant" and key == animated_key:
+        if role == "user":
+            st.markdown(
+                f'<div class="chat-message-user"><div class="chat-bubble-user">{escape(content)}</div></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            if key == animated_key:
+                st.markdown(
+                    '<div class="chat-message-assistant"><div class="chat-bubble-assistant">',
+                    unsafe_allow_html=True,
+                )
                 _stream_markdown(content)
+                st.markdown("</div></div>", unsafe_allow_html=True)
                 st.session_state.pending_stream_message_key = None
             else:
-                st.write(content)
-    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="chat-message-assistant"><div class="chat-bubble-assistant">{escape(content)}</div></div>',
+                    unsafe_allow_html=True,
+                )
 
 
 _inject_theme()
@@ -649,11 +701,12 @@ if st.session_state.get("show_payment_modal") and state.get("selected_itinerary"
             align-items: center;
             justify-content: center;
             z-index: 999;
+            overflow: hidden;
         }}
         .modal-content {{
             background: white;
             border-radius: 16px;
-            padding: 32px;
+            padding: 40px 32px 32px;
             max-width: 480px;
             box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
             text-align: center;
@@ -676,30 +729,32 @@ if st.session_state.get("show_payment_modal") and state.get("selected_itinerary"
             margin-bottom: 24px;
             line-height: 1.6;
         }}
-        .modal-buttons {{
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 480px;
-            display: flex;
-            gap: 12px;
-            z-index: 1000;
-        }}
         </style>
         <div class="modal-overlay">
           <div class="modal-content">
-            <div style="font-size:2.5rem;margin-bottom:16px">✈️</div>
+            <div style="font-size:3rem;margin-bottom:24px">✈️</div>
             <div class="modal-title">Trip Selected!</div>
             <div class="modal-price">${itin.total_cost:,.0f}</div>
             <div class="modal-text">
-              You've selected <b>{itin.flight.airline}</b> + <b>{itin.hotel.name}</b>
+              <b>{itin.flight.airline}</b> + <b>{itin.hotel.name}</b>
             </div>
             <div class="modal-text" style="color: #334155; font-weight: 600;">
               Proceed to payment to complete your booking
             </div>
           </div>
         </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <style>
+        [data-testid="stButton"] {
+            position: relative;
+            z-index: 1001 !important;
+        }
+        </style>
         """,
         unsafe_allow_html=True,
     )
