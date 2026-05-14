@@ -13,8 +13,10 @@ except ImportError:  # pragma: no cover - dotenv is optional at runtime.
 
 try:
     from .models import Itinerary, TravelRequest
+    from .data.static import STATIC_DATA
 except ImportError:
     from models import Itinerary, TravelRequest
+    from data.static import STATIC_DATA
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -123,7 +125,8 @@ def extract_travel_request_fields(user_message: str) -> dict[str, Any]:
         "Extract travel planning fields from this customer message. "
         "Return only valid JSON with keys from this exact set: "
         "destination, departure_date, return_date, budget, travel_style. "
-        "Use YYYY-MM-DD dates. destination must be one of Tokyo, Paris, Bali, New York "
+        "Use YYYY-MM-DD dates. destination must be one of these supported places when clear: "
+        f"{', '.join(STATIC_DATA.keys())}. "
         "when the customer clearly asks for one of them. travel_style must be an array "
         "using only these values when present: adventure, culture, luxury, romance, nature, food, budget. "
         "Omit any unknown fields. Do not guess dates.\n\n"

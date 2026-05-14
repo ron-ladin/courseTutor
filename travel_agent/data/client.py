@@ -34,6 +34,15 @@ _DEST_IATA: dict[str, str] = {
     "Paris":    "PAR",
     "Bali":     "DPS",
     "New York": "NYC",
+    "Japan": "TYO",
+    "France": "PAR",
+    "Italy": "ROM",
+    "Greece": "ATH",
+    "Thailand": "BKK",
+    "Spain": "MAD",
+    "United Kingdom": "LON",
+    "Mexico": "MEX",
+    "Israel": "TLV",
 }
 
 _DEST_COORDS: dict[str, tuple[float, float]] = {
@@ -41,6 +50,15 @@ _DEST_COORDS: dict[str, tuple[float, float]] = {
     "Paris":    (48.8566,    2.3522),
     "Bali":     (-8.4095,  115.1889),
     "New York": (40.7128,  -74.0060),
+    "Japan": (35.6762, 139.6503),
+    "France": (46.2276, 2.2137),
+    "Italy": (41.9028, 12.4964),
+    "Greece": (37.9838, 23.7275),
+    "Thailand": (13.7563, 100.5018),
+    "Spain": (40.4168, -3.7038),
+    "United Kingdom": (51.5072, -0.1276),
+    "Mexico": (19.4326, -99.1332),
+    "Israel": (32.0853, 34.7818),
 }
 
 _ORIGIN_IATA: str = os.environ.get("ORIGIN_IATA", "JFK")

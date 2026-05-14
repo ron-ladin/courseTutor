@@ -1,12 +1,36 @@
+from datetime import date as date_type
+
 import streamlit as st
 
-from agent import AgentState, build_graph
-from models import Itinerary
+try:
+    from travel_agent.agent import AgentState, build_graph
+    from travel_agent.models import Itinerary, TravelRequest
+except ImportError:
+    from agent import AgentState, build_graph
+    from models import Itinerary, TravelRequest
+
+_VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
 
 st.set_page_config(page_title="Travel Planning Agent", layout="centered", page_icon="✈️")
 st.title("✈️ Travel Planning Agent")
 
 # ── sidebar: demo guide ───────────────────────────────────────────────────────
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"] {
+        display: none;
+    }
+    section.main > div {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 with st.sidebar:
     st.header("Demo Scenarios")
     st.markdown(
@@ -147,8 +171,12 @@ if state["phase"] == "done" and state["booking"]:
 
 def _run_planning(state: AgentState) -> None:
     """Call the real planner directly (used when build_graph() is still a stub)."""
-    from data_client import DataClient
-    from planner import run_planning_loop
+    try:
+        from travel_agent.data.client import LiveDataClient as DataClient
+        from travel_agent.planner import run_planning_loop
+    except ImportError:
+        from data.client import LiveDataClient as DataClient
+        from planner import run_planning_loop
 
     tr = state["travel_request"]
     try:

@@ -6,16 +6,20 @@ from typing import Any, Optional, TypedDict
 
 try:
     from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from .data_client import DataClient
+    from .data.client import LiveDataClient as DataClient
+    from .data.static import STATIC_DATA
     from .openrouter_client import build_trip_explanation, extract_travel_request_fields
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
     from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
-    from data_client import DataClient
+    from data.client import LiveDataClient as DataClient
+    from data.static import STATIC_DATA
     from openrouter_client import build_trip_explanation, extract_travel_request_fields
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
 from langgraph.graph import END, StateGraph
+
+LiveDataClient = DataClient
 
 
 # ── State definition ──────────────────────────────────────────────────────────
@@ -40,14 +44,14 @@ class AgentState(TypedDict):
 _FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
 
 _QUESTIONS = {
-    "destination":    "What is your destination? (Tokyo, Paris, Bali, New York)",
+    "destination":    "What is your destination? You can type a city or country, like Tokyo, Italy, Greece, Thailand, or Mexico.",
     "departure_date": "What is your departure date? (YYYY-MM-DD)",
     "return_date":    "What is your return date? (YYYY-MM-DD)",
     "budget":         "What is your total budget in USD?",
     "travel_style":   "What travel styles do you prefer? (e.g. adventure, culture, luxury)",
 }
 
-_VALID_DESTINATIONS = ["Tokyo", "Paris", "Bali", "New York"]
+_VALID_DESTINATIONS = sorted(STATIC_DATA.keys(), key=len, reverse=True)
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
 
 
@@ -78,6 +82,8 @@ def _local_extract_travel_fields(text: str) -> dict[str, Any]:
         style for style in _VALID_STYLES
         if style != "budget" and re.search(rf"\b{re.escape(style)}\b", lowered)
     ]
+    if "romantic" in lowered and "romance" not in styles:
+        styles.append("romance")
     if re.search(r"\bbudget\s+(?:travel|trip|style|friendly)\b", lowered):
         styles.append("budget")
     if styles:
@@ -210,7 +216,7 @@ def onboard_node(state: AgentState) -> AgentState:
                 return _build_confirmed_request(state, messages, tr)
             elif last_user.lower() in ("no", "n"):
                 tr = {}
-                messages.append({"role": "assistant", "content": "No problem! Where would you like to travel? (Tokyo, Paris, Bali, New York)"})
+                messages.append({"role": "assistant", "content": "No problem! Where would you like to travel? You can type a city or country."})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"

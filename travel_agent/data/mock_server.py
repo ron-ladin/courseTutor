@@ -4,11 +4,14 @@ import uuid
 
 try:
     from ..models import Activity, BookingRequest, Flight, Hotel
+    from .static import STATIC_DATA
 except ImportError:
     try:
         from models import Activity, BookingRequest, Flight, Hotel
+        from data.static import STATIC_DATA
     except ImportError:
         from travel_agent.models import Activity, BookingRequest, Flight, Hotel
+        from travel_agent.data.static import STATIC_DATA
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 
@@ -86,6 +89,8 @@ _DATA: dict[str, dict] = {
         ],
     },
 }
+
+_DATA = STATIC_DATA
 
 # ── In-memory booking store ───────────────────────────────────────────────────
 # Keyed by booking_id; each entry records the confirmed item and passenger.
