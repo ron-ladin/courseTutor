@@ -36,9 +36,6 @@ if "graph" not in st.session_state:
         "reasoning_log":      [],
         "backtrack_count":    0,
         "phase":              "onboard",
-        "passenger_info":     {},
-        "contact_info":       {},
-        "payment_info":       {},
     }
 
 state: AgentState = st.session_state.state
@@ -89,14 +86,14 @@ if state["phase"] == "rank":
 
                 if st.button(f"Select Option {i + 1}", key=f"select_{i}"):
                     state["selected_itinerary"] = itin
-                    state["phase"] = "collect"
-                    # Invoke graph immediately so collect_passenger_node asks the first question
+                    state["phase"] = "confirm"
+                    # Invoke graph so confirm_node generates the booking
                     new_state = graph.invoke(state)
                     st.session_state.state = new_state
                     st.rerun()
 
 
-# ── Confirm panel (after passenger collection) ────────────────────────────────
+# ── Confirm panel (after itinerary selection) ─────────────────────────────────
 if state["phase"] == "confirm" and state["selected_itinerary"]:
     itin: Itinerary = state["selected_itinerary"]
     st.divider()
@@ -111,16 +108,7 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
         st.write(f"**Total Cost:** ${itin.total_cost:.2f}")
         st.write(f"**Match Score:** {itin.match_score:.2f}")
 
-    p = state.get("passenger_info", {})
-    c = state.get("contact_info",   {})
-    pay = state.get("payment_info", {})
-    with st.container(border=True):
-        st.write(f"**Passenger:** {p.get('full_name')} | Passport: {p.get('passport_number')}")
-        st.write(f"**Contact:** {c.get('email')} | {c.get('phone')}")
-        st.write(f"**Card:** **** {pay.get('card_last4')} (exp {pay.get('card_expiry')})")
-
     if st.button("Confirm & Book"):
-        # confirm_node calls the server and records all booking IDs
         new_state = graph.invoke(state)
         st.session_state.state = new_state
         st.rerun()

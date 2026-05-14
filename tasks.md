@@ -45,7 +45,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
 
 ## Tasks
 
-- [ ] 1. Set up project structure and shared scaffolding — **All Developers**
+- [~] 1. Set up project structure and shared scaffolding — **All Developers**
   - Create the `travel_agent/` directory with `__init__.py` files and `data/` subdirectory
   - Create `requirements.txt` pinning `streamlit`, `langgraph`, `pydantic`, `fastapi`, `uvicorn`, `httpx`, `hypothesis`, `pytest`
   - **Dev 1** writes typed stubs in `models.py` so everyone can import immediately:
@@ -124,7 +124,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
 ---
 
 - [ ] 2. Implement data models (`models.py`) — **Dev 1**
-  - [ ] 2.1 Implement `TravelRequest`, `Flight`, `Hotel`, `Activity`, `Itinerary`, `BookingConfirmation` Pydantic models
+  - [~] 2.1 Implement `TravelRequest`, `Flight`, `Hotel`, `Activity`, `Itinerary`, `BookingConfirmation` Pydantic models
     - Include `budget_must_be_positive` and `return_after_departure` field validators on `TravelRequest`
     - _Requirements: 1.4, 1.5, 1.6, 1.7_
 
@@ -141,7 +141,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
 ---
 
 - [ ] 3. Build mock server and data client — **Dev 2**
-  - [ ] 3.1 Implement `mock_server.py` as a FastAPI app on `localhost:8000`
+  - [~] 3.1 Implement `mock_server.py` as a FastAPI app on `localhost:8000`
     - Three route groups: `GET /flights/search`, `GET /hotels/search`, `GET /activities/search`, `GET /destinations`
     - `/flights/search?destination=<str>&date=<YYYY-MM-DD>` → returns list of `Flight` objects
     - `/hotels/search?destination=<str>&checkin=<str>&checkout=<str>&max_price=<float>` → returns filtered list of `Hotel` objects
@@ -151,7 +151,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - Each destination: ≥2 flights (with `airline`, `duration_hours`), ≥2 hotels (with `stars`), ≥3 activities
     - _Requirements: 2.1–2.9_
 
-  - [ ] 3.2 Implement `data_client.py` as an `httpx` HTTP client
+  - [~] 3.2 Implement `data_client.py` as an `httpx` HTTP client
     - `DataClient` class with `get_flights()`, `get_hotels()`, `get_activities()`, `destinations()` methods
     - Each method calls the corresponding MockServer endpoint and returns typed Pydantic model instances
     - Raise a clear `ConnectionError` with instructions if the server is unreachable
@@ -167,7 +167,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
 ---
 
 - [ ] 4. Implement MatchScore engine (`planner.py`) — **Dev 2**
-  - [ ] 4.1 Implement `compute_raw_score`, `aggregate_itinerary_tags`, and `normalize_scores` functions
+  - [~] 4.1 Implement `compute_raw_score`, `aggregate_itinerary_tags`, and `normalize_scores` functions
     - `compute_raw_score`: dot product (count of overlapping tags)
     - `normalize_scores`: Min-Max; return `[1.0] * n` when all scores are equal
     - _Requirements: 4.1, 4.2, 4.3_
@@ -185,7 +185,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
 ---
 
 - [ ] 5. Implement PlanningLoop (`planner.py`) — **Dev 2**
-  - [ ] 5.1 Implement `run_planning_loop(request, client, reasoning_log)` function
+  - [~] 5.1 Implement `run_planning_loop(request, client, reasoning_log)` function
     - Sort flights by price ascending; iterate with `flight_index`
     - Call `client.get_flights()` and `client.get_hotels(max_price=remaining)` — server handles budget filtering
     - Select best hotel by `compute_raw_score`; greedy activity allocation by score descending
@@ -223,17 +223,17 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - **Validates: Requirements 3.8**
     - Assert `1 <= len(itineraries) <= 3` for any valid `TravelRequest`
 
-- [ ] 6. Checkpoint — server + planner layer — **Dev 2 signals ready**
+- [~] 6. Checkpoint — server + planner layer — **Dev 2 signals ready**
   - MockServer running on `localhost:8000`; all smoke tests pass; share `data_client.py` and `planner.py` with Dev 3 and Dev 4.
 
 ---
 
-- [ ] 7. Implement LangGraph agent (`agent.py`) — **Dev 3**
-  - [ ] 7.1 Define `AgentState` TypedDict with all fields from the design
+- [x] 7. Implement LangGraph agent (`agent.py`) — **Dev 3**
+  - [x] 7.1 Define `AgentState` TypedDict with all fields from the design
     - Fields: `messages`, `travel_request`, `confirmed_request`, `itineraries`, `selected_itinerary`, `booking`, `reasoning_log`, `backtrack_count`, `phase`
     - _Requirements: 1.1, 1.2, 1.3_
 
-  - [ ] 7.2 Implement `onboard_node` with sequential question flow
+  - [x] 7.2 Implement `onboard_node` with sequential question flow
     - Ask one question at a time in order: destination → departure_date → return_date → budget → travel_style
     - Validate budget (positive number) and dates (departure < return) inline; re-prompt on failure
     - Display confirmation summary and await "yes" before transitioning phase to "plan"
@@ -244,7 +244,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - **Validates: Requirements 1.2**
     - Use `hypothesis` to generate four valid answer sequences and assert fields are populated in the correct order
 
-  - [ ] 7.4 Implement `plan_node` and `rank_node`
+  - [x] 7.4 Implement `plan_node` and `rank_node`
     - `plan_node`: instantiate `DataClient`, call `run_planning_loop`, store results in state, set phase to "rank"
     - `rank_node`: apply `normalize_scores` across itineraries, sort descending by `match_score`, append trade-off analysis to `reasoning_log`, trim to top 3
     - _Requirements: 3.1–3.8, 4.1–4.6, 5.2, 5.4_
@@ -254,7 +254,7 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - **Validates: Requirements 4.4, 4.5**
     - Assert `itineraries[i].match_score >= itineraries[i+1].match_score` for all adjacent pairs
 
-  - [ ] 7.6 Implement `confirm_node`
+  - [x] 7.6 Implement `confirm_node`
     - Display order summary; on user confirmation generate `uuid.uuid4()` as `BookingID`
     - Store `BookingConfirmation` in state; set phase to "done"
     - _Requirements: 6.3, 6.4, 6.5, 6.6_
@@ -269,27 +269,27 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - **Validates: Requirements 6.6**
     - Assert that invoking the graph from phase "confirm" only transitions to "done", never back to "rank" or earlier
 
-  - [ ] 7.9 Wire graph with `build_graph()` using `StateGraph`, conditional edges, and `compile()`
+  - [x] 7.9 Wire graph with `build_graph()` using `StateGraph`, conditional edges, and `compile()`
     - Edges: START → onboard → (continue | plan) → plan → rank → (wait | confirm) → confirm → END
     - _Requirements: 1.1–1.7, 3.1–3.8, 6.3–6.6_
 
-- [ ] 8. Checkpoint — agent layer — **Dev 3 signals ready**
+- [x] 8. Checkpoint — agent layer — **Dev 3 signals ready**
   - Ensure all tests pass; share `agent.py` with Dev 4.
 
 ---
 
 - [ ] 9. Implement Streamlit UI (`app.py`) — **Dev 4**
-  - [ ] 9.1 Initialize session state and render chat message history
+  - [~] 9.1 Initialize session state and render chat message history
     - Bootstrap `st.session_state.graph` and `st.session_state.state` on first load
     - Render all messages from `state["messages"]` using `st.chat_message`
     - _Requirements: 1.1_
 
-  - [ ] 9.2 Implement ReasoningPanel expander
+  - [~] 9.2 Implement ReasoningPanel expander
     - Render `st.expander("🧠 Agent Reasoning")` with all `reasoning_log` entries as bullet points
     - Show `"⏳ Planning in progress..."` spinner while `phase == "plan"`
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-  - [ ] 9.3 Implement itinerary card rendering
+  - [~] 9.3 Implement itinerary card rendering
     - For each itinerary in `state["itineraries"]` render a bordered container with: destination, flight id + price, hotel name + price/night, activity names, total cost, MatchScore
     - Show `"⚠️ Exceeds Budget"` label when `is_partial_fallback == True`
     - Render a `st.button(f"Select Option {i+1}")` per card; on click update state and rerun
@@ -300,11 +300,11 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - **Validates: Requirements 6.1**
     - Use `hypothesis` to generate `Itinerary` objects and assert all required fields are present and non-empty in the rendered output
 
-  - [ ] 9.5 Implement booking confirmation display
+  - [~] 9.5 Implement booking confirmation display
     - After `confirm_node` sets phase to "done", render the `BookingID` UUID in the chat as a confirmation message
     - _Requirements: 6.4, 6.5_
 
-  - [ ] 9.6 Wire chat input to graph invocation
+  - [~] 9.6 Wire chat input to graph invocation
     - On `st.chat_input` submission, append user message to `state["messages"]`, invoke `graph.invoke(state)`, update `st.session_state.state`, call `st.rerun()`
     - Handle destination-not-in-mock-data and no-itineraries-produced error states with user-facing messages
     - _Requirements: 1.1–1.7, 6.6_
@@ -314,24 +314,24 @@ Hour 18–20: ALL  — demo prep + final run (Task 12)
     - **Validates: Requirements 5.2**
     - Assert `len(reasoning_log) > 0` after any planning run and that it grows monotonically across steps
 
-- [ ] 10. Checkpoint — UI layer — **Dev 4 signals ready**
+- [~] 10. Checkpoint — UI layer — **Dev 4 signals ready**
   - Ensure all tests pass; all four modules ready for integration.
 
 ---
 
 - [ ] 11. Integration and wiring — **All Developers**
-  - [ ] 11.1 Start MockServer (`uvicorn mock_server:app --port 8000`) and connect all four modules end-to-end
+  - [~] 11.1 Start MockServer (`uvicorn mock_server:app --port 8000`) and connect all four modules end-to-end
     - Import `build_graph` in `app.py`; verify session state flows through onboard → plan → rank → confirm
     - Fix any import errors, missing fields, or type mismatches between modules
     - _Requirements: 1.1–1.7, 3.1–3.8, 4.1–4.6, 5.1–5.5, 6.1–6.6_
 
-  - [ ] 11.2 Verify backtracking path with Paris destination
+  - [~] 11.2 Verify backtracking path with Paris destination
     - Run a planning session with destination=Paris and a budget below $2,000 to trigger the backtrack and partial fallback path
     - Assert `is_partial_fallback == True` on the returned itinerary and that the ReasoningPanel shows the backtrack message
     - Confirm the ReasoningPanel shows the exact HTTP call: `GET /hotels/search?destination=Paris&max_price=...`
     - _Requirements: 2.7, 3.5, 3.6, 5.3_
 
-- [ ] 12. Final checkpoint — full demo run — **All Developers**
+- [~] 12. Final checkpoint — full demo run — **All Developers**
   - Full end-to-end run-through; polish UI; prepare the Paris backtracking scenario as the live demo highlight.
 
 ---

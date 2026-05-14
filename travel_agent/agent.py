@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import re
+import uuid
 from datetime import date
 from typing import Optional, TypedDict
 
 try:
-    from .models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
+    from .models import BookingConfirmation, Itinerary, TravelRequest
     from .data_client import DataClient
     from .planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 except ImportError:
-    from models import BookingConfirmation, ContactInfo, Itinerary, PassengerInfo, PaymentInfo, TravelRequest
+    from models import BookingConfirmation, Itinerary, TravelRequest
     from data_client import DataClient
     from planner import aggregate_itinerary_tags, compute_raw_score, normalize_scores, run_planning_loop
 
@@ -27,10 +27,7 @@ class AgentState(TypedDict):
     booking:            Optional[BookingConfirmation]
     reasoning_log:      list[str]
     backtrack_count:    int
-    phase:              str   # "onboard" | "plan" | "rank" | "collect" | "confirm" | "done"
-    passenger_info:     dict  # full_name, passport_number, date_of_birth
-    contact_info:       dict  # email, phone, address
-    payment_info:       dict  # card_last4, cardholder_name, card_expiry
+    phase:              str   # "onboard" | "plan" | "rank" | "confirm" | "done"
 
 
 # ── Onboarding ────────────────────────────────────────────────────────────────
@@ -161,7 +158,18 @@ def onboard_node(state: AgentState) -> AgentState:
                 return state
 
     if next_field is not None:
-        messages.append({"role": "assistant", "content": _QUESTIONS[next_field]})
+        # On the very first invocation (no messages yet), prepend a greeting
+        if not messages and next_field == "destination":
+            messages.append({
+                "role": "assistant",
+                "content": (
+                    "Hello! I'm your travel planning assistant. "
+                    "I'll help you build the perfect itinerary.\n\n"
+                    + _QUESTIONS["destination"]
+                ),
+            })
+        else:
+            messages.append({"role": "assistant", "content": _QUESTIONS[next_field]})
     else:
         if last_user is not None:
             messages.append({"role": "assistant", "content": _summary_text(tr)})
@@ -257,129 +265,18 @@ def rank_node(state: AgentState) -> AgentState:
     return state
 
 
-# ── Passenger / payment collection ───────────────────────────────────────────
-
-# Each tuple: (field_name, state_dict_key, question_prompt)
-_COLLECT_FIELDS: list[tuple[str, str, str]] = [
-    ("full_name",       "passenger_info", "Passenger's full legal name:"),
-    ("passport_number", "passenger_info", "Passport number:"),
-    ("date_of_birth",   "passenger_info", "Date of birth (YYYY-MM-DD):"),
-    ("email",           "contact_info",   "Contact email address:"),
-    ("phone",           "contact_info",   "Phone number (include country code):"),
-    ("address",         "contact_info",   "Billing address:"),
-    ("card_last4",      "payment_info",   "Last 4 digits of payment card (digits only):"),
-    ("cardholder_name", "payment_info",   "Name exactly as shown on card:"),
-    ("card_expiry",     "payment_info",   "Card expiry date (MM/YY):"),
-]
-
-
-def _validate_collect_field(field: str, value: str) -> Optional[str]:
-    """Returns an error string or None if the value is valid."""
-    if field == "date_of_birth":
-        try:
-            date.fromisoformat(value)
-        except ValueError:
-            return "Please enter a valid date (YYYY-MM-DD)."
-    elif field == "card_last4":
-        if not value.isdigit() or len(value) != 4:
-            return "Please enter exactly 4 digits."
-    elif field == "card_expiry":
-        if not re.fullmatch(r"(0[1-9]|1[0-2])/\d{2}", value):
-            return "Please enter expiry as MM/YY (e.g. 06/28)."
-    return None
-
-
-def _next_collect_field(
-    passenger_info: dict,
-    contact_info: dict,
-    payment_info: dict,
-) -> Optional[tuple[str, str, str]]:
-    stores = {"passenger_info": passenger_info, "contact_info": contact_info, "payment_info": payment_info}
-    for field, key, prompt in _COLLECT_FIELDS:
-        if field not in stores[key]:
-            return field, key, prompt
-    return None
-
-
-def collect_passenger_node(state: AgentState) -> AgentState:
-    """
-    Sequential collection of passenger, contact, and payment details.
-    One field per graph.invoke() call, with inline validation.
-    Advances to phase 'confirm' when all 9 fields are collected.
-    """
-    messages      = list(state.get("messages", []))
-    passenger_info = dict(state.get("passenger_info", {}))
-    contact_info   = dict(state.get("contact_info",   {}))
-    payment_info   = dict(state.get("payment_info",   {}))
-    reasoning_log  = list(state.get("reasoning_log",  []))
-
-    stores = {
-        "passenger_info": passenger_info,
-        "contact_info":   contact_info,
-        "payment_info":   payment_info,
-    }
-
-    last_user: Optional[str] = None
-    if messages and messages[-1].get("role") == "user":
-        last_user = messages[-1]["content"].strip()
-
-    if last_user is not None:
-        pending = _next_collect_field(passenger_info, contact_info, payment_info)
-        if pending is not None:
-            field, key, _ = pending
-            error = _validate_collect_field(field, last_user)
-            if error:
-                messages.append({"role": "assistant", "content": error})
-                state.update({"messages": messages, "passenger_info": passenger_info,
-                               "contact_info": contact_info, "payment_info": payment_info})
-                return state
-            stores[key][field] = last_user
-
-    next_field = _next_collect_field(passenger_info, contact_info, payment_info)
-
-    if next_field is not None:
-        _, _, prompt = next_field
-        messages.append({"role": "assistant", "content": prompt})
-    else:
-        # All collected — show summary and advance to confirm
-        reasoning_log.append("All passenger and payment details collected.")
-        state["phase"] = "confirm"
-        messages.append({
-            "role": "assistant",
-            "content": (
-                "All details collected. Here's your booking summary:\n\n"
-                f"**Passenger:** {passenger_info.get('full_name')} | Passport: {passenger_info.get('passport_number')}\n"
-                f"**DOB:** {passenger_info.get('date_of_birth')}\n"
-                f"**Contact:** {contact_info.get('email')} | {contact_info.get('phone')}\n"
-                f"**Address:** {contact_info.get('address')}\n"
-                f"**Payment:** **** {payment_info.get('card_last4')} (exp {payment_info.get('card_expiry')}) — {payment_info.get('cardholder_name')}\n\n"
-                "Click **Confirm & Book** to finalize."
-            ),
-        })
-
-    state.update({
-        "messages":      messages,
-        "passenger_info": passenger_info,
-        "contact_info":   contact_info,
-        "payment_info":   payment_info,
-        "reasoning_log":  reasoning_log,
-    })
-    return state
-
-
 # ── Confirm & book ────────────────────────────────────────────────────────────
 
 def confirm_node(state: AgentState) -> AgentState:
     """
-    Calls the mock server to POST-book each component (flight, hotel, activities),
-    assembles a BookingConfirmation with the server-issued IDs, and sets phase='done'.
+    Displays an order summary, generates a UUID v4 as the BookingID,
+    stores a BookingConfirmation in state, and sets phase='done'.
+
+    Requirements: 6.3, 6.4, 6.5, 6.6
     """
-    messages       = list(state.get("messages", []))
-    selected       = state.get("selected_itinerary")
-    passenger_info = state.get("passenger_info", {})
-    contact_info   = state.get("contact_info",   {})
-    payment_info   = state.get("payment_info",   {})
-    reasoning_log  = list(state.get("reasoning_log", []))
+    messages      = list(state.get("messages", []))
+    selected      = state.get("selected_itinerary")
+    reasoning_log = list(state.get("reasoning_log", []))
 
     if not selected:
         messages.append({"role": "assistant", "content": "No itinerary selected."})
@@ -387,60 +284,39 @@ def confirm_node(state: AgentState) -> AgentState:
         state["phase"] = "done"
         return state
 
-    try:
-        passenger = PassengerInfo(
-            full_name=passenger_info["full_name"],
-            passport_number=passenger_info["passport_number"],
-            date_of_birth=date.fromisoformat(passenger_info["date_of_birth"]),
-        )
-        contact = ContactInfo(**contact_info)
-        payment = PaymentInfo(**payment_info)
-        client  = DataClient()
+    # Req 6.4: generate UUID v4 locally as the BookingID
+    booking_id = str(uuid.uuid4())
+    reasoning_log.append(f"Generated BookingID: {booking_id}")
 
-        reasoning_log.append(f"Booking {selected.flight.airline} flight ({selected.flight.id})...")
-        flight_bid = client.book_flight(selected.flight.id, passenger, contact, payment)
-        reasoning_log.append(f"Flight confirmed → {flight_bid}")
+    # Req 6.5: store BookingConfirmation in state
+    booking = BookingConfirmation(
+        booking_id=booking_id,
+        itinerary=selected,
+    )
+    state["booking"] = booking
 
-        reasoning_log.append(f"Booking {selected.hotel.name} ({selected.hotel.id})...")
-        hotel_bid = client.book_hotel(selected.hotel.id, passenger, contact, payment)
-        reasoning_log.append(f"Hotel confirmed → {hotel_bid}")
+    # Req 6.6: set phase to "done"
+    state["phase"] = "done"
 
-        activity_bids: list[str] = []
-        for activity in selected.activities:
-            reasoning_log.append(f"Booking activity: {activity.name}...")
-            bid = client.book_activity(activity.id, passenger, contact, payment)
-            activity_bids.append(bid)
-            reasoning_log.append(f"Activity confirmed → {bid}")
-
-        booking = BookingConfirmation(
-            booking_id=flight_bid,
-            hotel_booking_id=hotel_bid,
-            activity_booking_ids=activity_bids,
-            itinerary=selected,
-            passenger=passenger,
-            contact=contact,
-        )
-        state["booking"] = booking
-        state["phase"]   = "done"
-
-        activity_lines = "\n".join(f"  - Activity: {bid}" for bid in activity_bids)
-        messages.append({
-            "role": "assistant",
-            "content": (
-                f"Your trip is confirmed!\n\n"
-                f"  - Flight: {flight_bid}\n"
-                f"  - Hotel:  {hotel_bid}\n"
-                f"{activity_lines}\n\n"
-                f"Total charged: ${selected.total_cost:.2f} to card ending in {payment_info.get('card_last4', '????')}. "
-                f"Safe travels, {passenger_info.get('full_name', 'traveller')}!"
-            ),
-        })
-        reasoning_log.append(f"All bookings confirmed. Master reference: {flight_bid}.")
-
-    except ConnectionError as e:
-        messages.append({"role": "assistant", "content": str(e)})
-    except Exception as e:
-        messages.append({"role": "assistant", "content": f"Booking error: {e}"})
+    # Req 6.3: display order summary with BookingID
+    activities_text = (
+        "\n".join(f"    • {a.name} (${a.price:.2f})" for a in selected.activities)
+        if selected.activities else "    • None"
+    )
+    messages.append({
+        "role": "assistant",
+        "content": (
+            "✅ Your trip is confirmed!\n\n"
+            "**Booking Summary**\n"
+            f"  ✈️  Flight:  {selected.flight.airline} — ${selected.flight.price:.2f}\n"
+            f"  🏨  Hotel:   {selected.hotel.name} ({selected.hotel.stars}★) — ${selected.hotel.price_per_night:.2f}/night\n"
+            f"  🎯  Activities:\n{activities_text}\n"
+            f"  💰  Total:   ${selected.total_cost:.2f}\n\n"
+            f"**Booking ID: {booking_id}**\n\n"
+            "Safe travels!"
+        ),
+    })
+    reasoning_log.append(f"Booking confirmed. BookingID: {booking_id}.")
 
     state["messages"]      = messages
     state["reasoning_log"] = reasoning_log
@@ -457,25 +333,21 @@ def build_graph():
 
     Flow:
       onboard  → plan → rank → END  (wait for user to select option)
-      collect  → END               (wait for next passenger-detail answer)
       confirm  → END               (booking complete)
     """
     g = StateGraph(AgentState)
 
-    g.add_node("router",            lambda s: s)  # pass-through dispatcher
-    g.add_node("onboard",           onboard_node)
-    g.add_node("plan",              plan_node)
-    g.add_node("rank",              rank_node)
-    g.add_node("collect_passenger", collect_passenger_node)
-    g.add_node("confirm",           confirm_node)
+    g.add_node("router",  lambda s: s)  # pass-through dispatcher
+    g.add_node("onboard", onboard_node)
+    g.add_node("plan",    plan_node)
+    g.add_node("rank",    rank_node)
+    g.add_node("confirm", confirm_node)
 
     g.set_entry_point("router")
 
     # Route to the correct node based on current phase
     def _dispatch(s: AgentState) -> str:
         phase = s.get("phase", "onboard")
-        if phase == "collect":
-            return "collect"
         if phase == "confirm":
             return "confirm"
         return "onboard"
@@ -483,7 +355,7 @@ def build_graph():
     g.add_conditional_edges(
         "router",
         _dispatch,
-        {"collect": "collect_passenger", "confirm": "confirm", "onboard": "onboard"},
+        {"confirm": "confirm", "onboard": "onboard"},
     )
 
     # After onboard: proceed to plan only when user confirmed the request
@@ -493,9 +365,8 @@ def build_graph():
         {"plan": "plan", END: END},
     )
 
-    g.add_edge("plan", "rank")
-    g.add_edge("rank",              END)
-    g.add_edge("collect_passenger", END)
-    g.add_edge("confirm",           END)
+    g.add_edge("plan",    "rank")
+    g.add_edge("rank",    END)
+    g.add_edge("confirm", END)
 
     return g.compile()
