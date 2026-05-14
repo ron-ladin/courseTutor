@@ -37,42 +37,75 @@ class AgentState(TypedDict):
 
 _FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
 
+_VALID_DESTINATIONS = ["Tokyo", "Paris", "Bali", "New York"]
+_VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
+
 _QUESTIONS = {
-    "destination":    "What is your destination? (Tokyo, Paris, Bali, New York)",
+    "destination":    f"What is your destination? Available: {', '.join(_VALID_DESTINATIONS)}",
     "departure_date": "What is your departure date? (YYYY-MM-DD)",
     "return_date":    "What is your return date? (YYYY-MM-DD)",
     "budget":         "What is your total budget in USD?",
-    "travel_style":   "What travel styles do you prefer? (e.g. adventure, culture, luxury)",
+    "travel_style":   f"What travel styles do you prefer? Choose from: {', '.join(_VALID_STYLES)} (comma-separated)",
+}
+
+_ACK = {
+    "destination":    lambda tr: f"Great, {tr['destination']}! ",
+    "departure_date": lambda tr: f"Departing on {tr['departure_date']}. ",
+    "return_date":    lambda tr: f"Returning on {tr['return_date']}. ",
+    "budget":         lambda tr: f"Budget: ${float(tr['budget']):.0f}. ",
+    "travel_style":   lambda tr: f"Style: {tr['travel_style']}. ",
 }
 
 
 def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
-    """Store validated value in tr. Returns an error message string, or None on success."""
-    if field == "budget":
+    """Validate and store value in tr. Returns an error message string, or None on success."""
+    if field == "destination":
+        match = next((d for d in _VALID_DESTINATIONS if d.lower() == value.strip().lower()), None)
+        if not match:
+            return (
+                f"'{value.strip()}' isn't available. "
+                f"Please choose from: {', '.join(_VALID_DESTINATIONS)}."
+            )
+        tr["destination"] = match
+
+    elif field == "travel_style":
+        styles = [s.strip().lower() for s in value.split(",") if s.strip()]
+        if not styles:
+            return f"Please enter at least one style from: {', '.join(_VALID_STYLES)}."
+        unknown = [s for s in styles if s not in _VALID_STYLES]
+        if unknown:
+            return (
+                f"Unknown style(s): {', '.join(unknown)}. "
+                f"Please choose from: {', '.join(_VALID_STYLES)}."
+            )
+        tr["travel_style"] = ", ".join(styles)
+
+    elif field == "budget":
         try:
             budget = float(value.replace("$", "").replace(",", ""))
             if budget <= 0:
                 return "Please enter a positive number for your budget."
             tr["budget"] = budget
         except ValueError:
-            return "Please enter a valid number for your budget."
+            return "Please enter a valid number for your budget (e.g. 2000)."
+
     elif field == "departure_date":
         try:
-            date.fromisoformat(value)
-            tr["departure_date"] = value
+            date.fromisoformat(value.strip())
+            tr["departure_date"] = value.strip()
         except ValueError:
-            return "Please enter a valid date (YYYY-MM-DD)."
+            return "Please enter a valid date in YYYY-MM-DD format (e.g. 2025-06-01)."
+
     elif field == "return_date":
         try:
-            ret = date.fromisoformat(value)
+            ret = date.fromisoformat(value.strip())
             dep = date.fromisoformat(tr["departure_date"])
             if ret <= dep:
-                return "Return date must be after departure date."
-            tr["return_date"] = value
+                return f"Return date must be after {tr['departure_date']}. Please re-enter."
+            tr["return_date"] = value.strip()
         except ValueError:
-            return "Please enter a valid date (YYYY-MM-DD)."
-    else:
-        tr[field] = value
+            return "Please enter a valid date in YYYY-MM-DD format (e.g. 2025-06-08)."
+
     return None
 
 
@@ -135,6 +168,7 @@ def onboard_node(state: AgentState) -> AgentState:
 
     if last_user is not None:
         if next_field is not None:
+            stored_field = next_field
             error = _validate_and_store(next_field, last_user, tr)
             if error:
                 messages.append({"role": "assistant", "content": error})
@@ -142,13 +176,23 @@ def onboard_node(state: AgentState) -> AgentState:
                 state["travel_request"] = tr
                 return state
             next_field = next((f for f in _FIELD_ORDER if f not in tr), None)
+            # Acknowledge the stored answer, then ask next question or show summary
+            ack = _ACK[stored_field](tr)
+            if next_field is not None:
+                messages.append({"role": "assistant", "content": ack + _QUESTIONS[next_field]})
+            else:
+                messages.append({"role": "assistant", "content": ack + "\n\n" + _summary_text(tr)})
+            state["messages"] = messages
+            state["travel_request"] = tr
+            state["phase"] = "onboard"
+            return state
         else:
             # All fields filled — this message is the yes/no confirmation
             if last_user.lower() in ("yes", "y", "confirm", "ok"):
                 return _build_confirmed_request(state, messages, tr)
             elif last_user.lower() in ("no", "n"):
                 tr = {}
-                messages.append({"role": "assistant", "content": "No problem! Where would you like to travel? (Tokyo, Paris, Bali, New York)"})
+                messages.append({"role": "assistant", "content": "No problem! Let's start over.\n\n" + _QUESTIONS["destination"]})
                 state["messages"] = messages
                 state["travel_request"] = tr
                 state["phase"] = "onboard"

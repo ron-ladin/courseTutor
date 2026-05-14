@@ -106,15 +106,18 @@ def test_planning_loop_selects_lowest_cost_flight_first(prices):
 
 
 def test_hotel_search_uses_remaining_budget_as_max_price():
+    # Planner now passes per-night ceiling: (budget - flight) / nights
+    # travel_request uses 2026-06-01 → 2026-06-08 = 7 nights
+    # budget=1000, flight=300 → remaining=700, per_night=700/7=100
     client = FakeClient(
         flights=[flight("f1", 300)],
         hotels=[hotel("h1", 100), hotel("h2", 500)],
     )
 
-    itineraries = run_planning_loop(travel_request(budget=650), client, [])
+    itineraries = run_planning_loop(travel_request(budget=1000), client, [])
 
-    assert client.hotel_queries[0] == pytest.approx(350)
-    assert itineraries[0].hotel.price_per_night <= 350
+    assert client.hotel_queries[0] == pytest.approx(100)  # 700 / 7 nights
+    assert itineraries[0].hotel.price_per_night <= 100
 
 
 def test_planning_loop_selects_highest_match_score_hotel():
@@ -133,9 +136,11 @@ def test_planning_loop_selects_highest_match_score_hotel():
 
 
 def test_activity_allocation_stays_within_remaining_budget():
+    # 7 nights; budget=1000, flight=300 → per-night ceiling=(1000-300)/7=100
+    # hotel h1=$50/night (passes). Total hotel=50*7=350. Remaining for activities=700-350=350.
     client = FakeClient(
         flights=[flight("f1", 300)],
-        hotels=[hotel("h1", 200)],
+        hotels=[hotel("h1", 50)],
         activities=[
             activity("a1", 150, ["culture", "adventure"]),
             activity("a2", 100, ["culture"]),
@@ -143,10 +148,10 @@ def test_activity_allocation_stays_within_remaining_budget():
         ],
     )
 
-    itineraries = run_planning_loop(travel_request(budget=650), client, [])
-    selected_activity_cost = sum(activity.price for activity in itineraries[0].activities)
+    itineraries = run_planning_loop(travel_request(budget=1000), client, [])
+    selected_activity_cost = sum(a.price for a in itineraries[0].activities)
 
-    assert selected_activity_cost <= 150
+    assert selected_activity_cost <= 350  # remaining after flight + hotel
 
 
 def test_backtrack_iteration_never_exceeds_one_and_creates_partial_fallback():

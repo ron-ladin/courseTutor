@@ -130,6 +130,14 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
 if state["phase"] == "done" and state["booking"]:
     st.divider()
     st.success(f"Booking Confirmed — ID: `{state['booking'].booking_id}`")
+    if st.button("Plan Another Trip", type="primary"):
+        st.session_state.state = {
+            "messages": [], "travel_request": {}, "confirmed_request": None,
+            "itineraries": [], "selected_itinerary": None, "booking": None,
+            "reasoning_log": [], "backtrack_count": 0, "phase": "onboard",
+            "passenger_info": {}, "contact_info": {}, "payment_info": {},
+        }
+        st.rerun()
 
 
 # ── stub-mode helpers ─────────────────────────────────────────────────────────
