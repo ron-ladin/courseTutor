@@ -389,7 +389,9 @@ def _validate_and_store(field: str, value: str, tr: dict) -> Optional[str]:
 
     elif field == "departure_date":
         try:
-            date.fromisoformat(value.strip())
+            parsed = date.fromisoformat(value.strip())
+            if parsed < date.today():
+                return f"{value.strip()} is in the past. Please enter a future departure date."
             tr["departure_date"] = value.strip()
         except ValueError:
             return "Please enter a valid date in YYYY-MM-DD format."
@@ -615,22 +617,41 @@ def onboard_node(state: AgentState) -> AgentState:
         travel_request[suggestion_marker] = current_destination
         agent_status = "COLLECTING"
 
-    # Budget sanity check — warn before asking more questions
-    budget = travel_request.get("budget")
-    destination = travel_request.get("destination")
-    if budget is not None and destination is not None:
-        dest_flights = STATIC_DATA.get(str(destination), {}).get("flights", [])
-        if dest_flights:
-            min_flight_price = min(f.price for f in dest_flights)
-            if float(budget) < min_flight_price:
-                response_to_user = (
-                    f"That budget won't quite get you there — the cheapest flight to "
-                    f"{destination} starts at ${min_flight_price:.0f}, and your current "
-                    f"budget of ${float(budget):.0f} doesn't cover even the flight alone. "
-                    f"What budget were you thinking for this trip?"
+    # Validation — only first failing check fires (no override)
+    _validation_msg: Optional[str] = None
+
+    dep_str = travel_request.get("departure_date")
+    if dep_str:
+        try:
+            if date.fromisoformat(str(dep_str)) < date.today():
+                _validation_msg = (
+                    f"{dep_str} is already in the past. "
+                    f"Please choose a future departure date."
                 )
-                travel_request.pop("budget", None)
-                agent_status = "COLLECTING"
+                travel_request.pop("departure_date", None)
+                travel_request.pop("return_date", None)
+        except ValueError:
+            pass
+
+    if not _validation_msg:
+        budget = travel_request.get("budget")
+        destination = travel_request.get("destination")
+        if budget is not None and float(budget) > 0 and destination is not None:
+            dest_flights = STATIC_DATA.get(str(destination), {}).get("flights", [])
+            if dest_flights:
+                min_flight_price = min(f.price for f in dest_flights)
+                if float(budget) < min_flight_price:
+                    _validation_msg = (
+                        f"That budget won't quite get you there — the cheapest flight to "
+                        f"{destination} starts at ${min_flight_price:.0f}, and your current "
+                        f"budget of ${float(budget):.0f} doesn't cover even the flight alone. "
+                        f"What budget were you thinking for this trip?"
+                    )
+                    travel_request.pop("budget", None)
+
+    if _validation_msg:
+        response_to_user = _validation_msg
+        agent_status = "COLLECTING"
 
     if response_to_user:
         messages.append({"role": "assistant", "content": response_to_user})

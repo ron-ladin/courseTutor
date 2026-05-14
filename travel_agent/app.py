@@ -601,7 +601,6 @@ def _render_chat_bubble(role: str, content: str) -> None:
 def _stream_chat_bubble(role: str, text: str) -> None:
     placeholder = st.empty()
     rendered = ""
-    text = text.replace("$", r"\$")
     chunks = text.split(" ")
 
     for index, chunk in enumerate(chunks):

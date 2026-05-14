@@ -23,6 +23,12 @@ class TravelRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def departure_must_be_future(self):
+        if self.departure_date < date.today():
+            raise ValueError("departure_date must be today or in the future")
+        return self
+
+    @model_validator(mode="after")
     def return_after_departure(self):
         if self.return_date <= self.departure_date:
             raise ValueError("return_date must be after departure_date")
