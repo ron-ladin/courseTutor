@@ -6,8 +6,25 @@ import streamlit as st
 from agent import AgentState, build_graph
 from models import BookingConfirmation, Itinerary, TravelRequest
 
-st.set_page_config(page_title="Travel Planning Agent", layout="centered")
-st.title("Travel Planning Agent")
+st.set_page_config(page_title="Travel Planning Agent", layout="centered", page_icon="✈️")
+st.title("✈️ Travel Planning Agent")
+
+# ── sidebar: demo guide ───────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("Demo Scenarios")
+    st.markdown(
+        "**Tokyo (happy path)**\n"
+        "- Budget: $2,000+\n"
+        "- Style: adventure, culture\n\n"
+        "**Paris (backtracking demo)**\n"
+        "- Budget: $1,500 ← triggers backtrack!\n"
+        "- Style: romance\n"
+        "- All Paris hotels > $1,500/night\n"
+        "- Watch the Reasoning panel fill up\n\n"
+        "**Bali / New York** — standard paths"
+    )
+    st.divider()
+    st.caption("Start the mock server before using:\n`uvicorn mock_server:app --port 8000`")
 
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
 
@@ -50,14 +67,19 @@ for msg in state["messages"]:
 
 
 # ── reasoning panel ───────────────────────────────────────────────────────────
-with st.expander("Agent Reasoning", expanded=False):
+with st.expander("Agent Reasoning", expanded=bool(state["reasoning_log"])):
+    if state["phase"] == "plan":
+        st.info("Planning in progress...")
     if state["reasoning_log"]:
         for entry in state["reasoning_log"]:
-            st.write(f"• {entry}")
+            if "backtrack" in entry.lower() or "fallback" in entry.lower():
+                st.warning(f"⚠ {entry}")
+            elif entry.startswith("GET "):
+                st.code(entry, language=None)
+            else:
+                st.write(f"• {entry}")
     else:
         st.caption("No reasoning steps yet.")
-    if state["phase"] == "plan":
-        st.write("Planning in progress...")
 
 
 # ── itinerary cards ───────────────────────────────────────────────────────────
@@ -117,6 +139,19 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
 if state["phase"] == "done" and state["booking"]:
     st.divider()
     st.success(f"Booking Confirmed — ID: `{state['booking'].booking_id}`")
+    if st.button("Plan Another Trip", type="primary"):
+        st.session_state.state = {
+            "messages": [],
+            "travel_request": {},
+            "confirmed_request": None,
+            "itineraries": [],
+            "selected_itinerary": None,
+            "booking": None,
+            "reasoning_log": [],
+            "backtrack_count": 0,
+            "phase": "onboard",
+        }
+        st.rerun()
 
 
 # ── stub-mode helpers ─────────────────────────────────────────────────────────
