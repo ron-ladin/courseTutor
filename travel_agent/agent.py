@@ -249,11 +249,10 @@ def rank_node(state: AgentState) -> AgentState:
     options_text = ""
     if ai_explanation:
         options_text += f"{ai_explanation}\n\n"
-        reasoning_log.append(
-            "OpenRouter generated a grounded customer-facing answer from mock itinerary data."
-        )
+        reasoning_log.append("OpenRouter generated a grounded customer-facing answer.")
 
-    options_text += "Here are the mock-data options I found:\n\n"
+    data_label = "live" if DataClient().using_live_data else "available"
+    options_text += f"Here are the {data_label} options I found:\n\n"
 
     for i, it in enumerate(itineraries):
         activities = ", ".join(a.name for a in it.activities) or "None"

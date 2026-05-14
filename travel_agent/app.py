@@ -419,7 +419,7 @@ if not state["messages"]:
 conversation_started = _has_user_message(state)
 _render_topbar(show_reset=conversation_started or state["phase"] != "onboard")
 
-if not conversation_started and state["phase"] == "onboard":
+if not state["messages"]:
     _render_landing()
 else:
     st.markdown('<div class="chat-space">', unsafe_allow_html=True)

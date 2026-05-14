@@ -1,15 +1,16 @@
 """
 LiveDataClient — single API source for all travel data.
 
-All three data types fetched from Amadeus sandbox when credentials are set;
-each falls back independently to embedded static data on any error.
-
+Flight data is fetched from SerpAPI Google Flights when SERPAPI_API_KEY is set;
+otherwise falls back to Amadeus sandbox (if credentials set), then embedded static data.
+Hotels and activities use Amadeus → static fallback.
 Bookings generate local UUIDs — no external server required.
 
-Setup (free at https://developers.amadeus.com/):
-  export AMADEUS_CLIENT_ID="your_id"
+Setup:
+  export SERPAPI_API_KEY="your_serpapi_key"   # primary flight source
+  export AMADEUS_CLIENT_ID="your_id"          # fallback flight/hotel/activity source
   export AMADEUS_CLIENT_SECRET="your_secret"
-  export ORIGIN_IATA="TLV"   # optional, default JFK
+  export ORIGIN_IATA="TLV"                    # optional, default JFK
 """
 
 from __future__ import annotations
@@ -18,6 +19,12 @@ import os
 import re
 import uuid
 from datetime import date as _date
+
+try:
+    from dotenv import load_dotenv, find_dotenv
+    load_dotenv(find_dotenv(usecwd=True))
+except ImportError:
+    pass
 
 try:
     from ..models import Activity, ContactInfo, Flight, Hotel, PassengerInfo, PaymentInfo
@@ -30,19 +37,79 @@ except ImportError:
 # ── Destination → IATA / coordinates ──────────────────────────────────────────
 
 _DEST_IATA: dict[str, str] = {
-    "Tokyo":    "TYO",
-    "Paris":    "PAR",
-    "Bali":     "DPS",
-    "New York": "NYC",
-    "Japan": "TYO",
-    "France": "PAR",
-    "Italy": "ROM",
-    "Greece": "ATH",
-    "Thailand": "BKK",
-    "Spain": "MAD",
+    "Tokyo":          "TYO",
+    "Paris":          "PAR",
+    "Bali":           "DPS",
+    "New York":       "NYC",
+    "Japan":          "TYO",
+    "France":         "PAR",
+    "Italy":          "ROM",
+    "Greece":         "ATH",
+    "Thailand":       "BKK",
+    "Spain":          "MAD",
     "United Kingdom": "LON",
-    "Mexico": "MEX",
-    "Israel": "TLV",
+    "Mexico":         "MEX",
+    "Israel":         "TLV",
+}
+
+# Maps lowercase city/region aliases → canonical destination name (key in STATIC_DATA / _DEST_IATA)
+_CITY_ALIASES: dict[str, str] = {
+    # Israel / TLV
+    "tel aviv":         "Israel",
+    "tel aviv israel":  "Israel",
+    "tlv":              "Israel",
+    "ben gurion":       "Israel",
+    "jerusalem":        "Israel",
+    "haifa":            "Israel",
+    # United Kingdom
+    "london":           "United Kingdom",
+    "uk":               "United Kingdom",
+    "england":          "United Kingdom",
+    "britain":          "United Kingdom",
+    "edinburgh":        "United Kingdom",
+    # Italy
+    "rome":             "Italy",
+    "milan":            "Italy",
+    "florence":         "Italy",
+    "venice":           "Italy",
+    "naples":           "Italy",
+    # Spain
+    "barcelona":        "Spain",
+    "madrid":           "Spain",
+    "seville":          "Spain",
+    "mallorca":         "Spain",
+    # Thailand
+    "bangkok":          "Thailand",
+    "phuket":           "Thailand",
+    "chiang mai":       "Thailand",
+    "koh samui":        "Thailand",
+    # Mexico
+    "cancun":           "Mexico",
+    "mexico city":      "Mexico",
+    "tulum":            "Mexico",
+    "oaxaca":           "Mexico",
+    # Greece
+    "athens":           "Greece",
+    "santorini":        "Greece",
+    "mykonos":          "Greece",
+    "crete":            "Greece",
+    # France
+    "nice":             "France",
+    "lyon":             "France",
+    "marseille":        "France",
+    # Japan
+    "osaka":            "Japan",
+    "kyoto":            "Japan",
+    "hokkaido":         "Japan",
+    "hiroshima":        "Japan",
+    # USA / New York
+    "usa":              "New York",
+    "us":               "New York",
+    "america":          "New York",
+    "united states":    "New York",
+    "nyc":              "New York",
+    "new york city":    "New York",
+    "manhattan":        "New York",
 }
 
 _DEST_COORDS: dict[str, tuple[float, float]] = {
@@ -157,6 +224,8 @@ class LiveDataClient:
 
     def __init__(self) -> None:
         self._amadeus = None
+        self._serpapi_key = os.environ.get("SERPAPI_API_KEY", "").strip()
+
         cid     = os.environ.get("AMADEUS_CLIENT_ID",     "").strip()
         csecret = os.environ.get("AMADEUS_CLIENT_SECRET", "").strip()
         if cid and csecret:
@@ -168,17 +237,87 @@ class LiveDataClient:
 
     @property
     def using_live_data(self) -> bool:
-        return self._amadeus is not None
+        return bool(self._serpapi_key) or self._amadeus is not None
 
     # ── Flights ───────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _serpapi_style_tags(price: float, duration_hours: float, stops: int) -> list[str]:
+        tags: set[str] = set()
+        tags.add("luxury" if stops == 0 else "budget")
+        if duration_hours > 12:
+            tags.add("adventure")
+        elif duration_hours < 6:
+            tags.add("culture")
+        if price > 1200:
+            tags.add("luxury")
+        elif price < 600:
+            tags.add("budget")
+        return list(tags) or ["culture"]
+
+    def _fetch_serpapi_flights(self, destination: str, dest_iata: str, date: str) -> list[Flight]:
+        from serpapi import SerpApiClient
+        origin = os.environ.get("ORIGIN_IATA", _ORIGIN_IATA)
+        params = {
+            "engine":        "google_flights",
+            "departure_id":  origin,
+            "arrival_id":    dest_iata,
+            "outbound_date": date,
+            "currency":      "USD",
+            "hl":            "en",
+            "type":          "2",   # one-way
+            "adults":        "1",
+            "api_key":       self._serpapi_key,
+        }
+        data = SerpApiClient(params).get_dict()
+
+        flights: list[Flight] = []
+        seen: set[str] = set()
+        all_offers = data.get("best_flights", []) + data.get("other_flights", [])
+        for offer in all_offers[:6]:
+            segments = offer.get("flights", [])
+            if not segments:
+                continue
+            price = float(offer.get("price", 0) or 0)
+            if price <= 0:
+                continue
+            duration_hours = round(offer.get("total_duration", 0) / 60, 1)
+            airline = segments[0].get("airline", "Unknown")
+            stops   = len(segments) - 1
+            fid = f"serp-{airline.replace(' ', '_')}-{int(price)}-{dest_iata}"
+            if fid in seen:
+                fid = f"{fid}-{uuid.uuid4().hex[:4]}"
+            seen.add(fid)
+            flights.append(Flight(
+                id=fid,
+                destination=destination,
+                price=price,
+                airline=airline,
+                duration_hours=duration_hours,
+                style_tags=self._serpapi_style_tags(price, duration_hours, stops),
+            ))
+        return flights
+
     def get_flights(self, destination: str, date: str) -> list[Flight]:
-        if self._amadeus and destination in _DEST_IATA:
+        canonical = _CITY_ALIASES.get(destination.lower(), destination)
+        dest_iata = _DEST_IATA.get(canonical) or _DEST_IATA.get(destination)
+
+        # SerpAPI — primary live source
+        if self._serpapi_key and dest_iata:
+            try:
+                flights = self._fetch_serpapi_flights(canonical, dest_iata, date)
+                if flights:
+                    return flights
+            except Exception:
+                pass
+
+        # Amadeus — secondary live source
+        if self._amadeus and dest_iata:
             try:
                 origin = os.environ.get("ORIGIN_IATA", _ORIGIN_IATA)
                 resp = self._amadeus.shopping.flight_offers_search.get(
                     originLocationCode=origin,
-                    destinationLocationCode=_DEST_IATA[destination],
+                    destinationLocationCode=dest_iata,
                     departureDate=date,
                     adults=1,
                     currencyCode="USD",
@@ -198,7 +337,7 @@ class LiveDataClient:
                         )[0]
                         flights.append(Flight(
                             id=fid,
-                            destination=destination,
+                            destination=canonical,
                             price=float(offer["price"]["total"]),
                             airline=_carrier_name(carrier),
                             duration_hours=_parse_duration_hours(itin["duration"]),
@@ -208,7 +347,9 @@ class LiveDataClient:
                         return flights
             except Exception:
                 pass
-        return list(STATIC_DATA.get(destination, {}).get("flights", []))
+
+        # Static fallback
+        return list(STATIC_DATA.get(canonical, STATIC_DATA.get(destination, {})).get("flights", []))
 
     # ── Hotels ────────────────────────────────────────────────────────────────
 
