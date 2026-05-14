@@ -144,6 +144,27 @@ def _build_catalog() -> None:
                 Activity(id="a45", destination="Kyoto", name="Sake Tasting Tour", price=95, style_tags=["food", "culture"]),
             ],
         },
+        "Nice": {
+            "flights": [
+                Flight(id="f116", destination="Nice", price=430, airline="Air France", duration_hours=9, style_tags=["romance", "culture"]),
+                Flight(id="f117", destination="Nice", price=390, airline="easyJet", duration_hours=9.8, style_tags=["budget", "adventure"]),
+                Flight(id="f118", destination="Nice", price=620, airline="Lufthansa", duration_hours=8.7, style_tags=["luxury", "culture"]),
+                Flight(id="f119", destination="Nice", price=510, airline="KLM", duration_hours=9.2, style_tags=["food", "romance"]),
+            ],
+            "hotels": [
+                Hotel(id="h104", destination="Nice", name="Promenade Sea View Hotel", price_per_night=210, stars=4, style_tags=["romance", "luxury"]),
+                Hotel(id="h105", destination="Nice", name="Old Town Nice Inn", price_per_night=125, stars=3, style_tags=["culture", "food"]),
+                Hotel(id="h106", destination="Nice", name="French Riviera Budget Stay", price_per_night=80, stars=2, style_tags=["budget", "culture"]),
+                Hotel(id="h107", destination="Nice", name="Cote d'Azur Boutique Suites", price_per_night=260, stars=4, style_tags=["luxury", "romance"]),
+            ],
+            "activities": [
+                Activity(id="a121", destination="Nice", name="Promenade des Anglais Walk", price=0, style_tags=["romance", "nature"]),
+                Activity(id="a122", destination="Nice", name="Old Nice Food Tour", price=70, style_tags=["food", "culture"]),
+                Activity(id="a123", destination="Nice", name="Matisse Museum Visit", price=18, style_tags=["art", "culture"]),
+                Activity(id="a124", destination="Nice", name="Monaco Day Trip", price=95, style_tags=["luxury", "adventure"]),
+                Activity(id="a125", destination="Nice", name="Riviera Wine Tasting", price=85, style_tags=["food", "romance"]),
+            ],
+        },
         "London": {
             "flights": [
                 Flight(id="f54", destination="London", price=420, airline="British Airways", duration_hours=7, style_tags=["culture", "luxury"]),
