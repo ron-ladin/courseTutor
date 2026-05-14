@@ -35,9 +35,49 @@ def onboard_node(state: AgentState) -> AgentState:
     """
     Sequential onboarding with one question at a time.
     Order: destination → departure_date → return_date → budget → travel_style
+    
+    Handles user input from the latest message if present.
     """
     messages = state.get("messages", [])
     travel_request = state.get("travel_request", {})
+    
+    # Extract user input from the latest message if it's from user
+    if messages and messages[-1].get("role") == "user":
+        latest_input = messages[-1].get("content", "").strip()
+        
+        # Determine which field to populate based on what's already answered
+        questions = [
+            "destination",
+            "departure_date",
+            "return_date",
+            "budget",
+            "travel_style",
+        ]
+        
+        answered_count = sum(1 for q in questions if q in travel_request)
+        if answered_count < len(questions):
+            field = questions[answered_count]
+            
+            # Validate input
+            if field == "budget":
+                try:
+                    travel_request["budget"] = float(latest_input)
+                except ValueError:
+                    messages.append({"role": "assistant", "content": "Please enter a valid number for budget."})
+                    state["messages"] = messages
+                    state["phase"] = "onboard"
+                    return state
+            elif field in ("departure_date", "return_date"):
+                try:
+                    date.fromisoformat(latest_input)
+                    travel_request[field] = latest_input
+                except ValueError:
+                    messages.append({"role": "assistant", "content": f"Please enter a valid date (YYYY-MM-DD)."})
+                    state["messages"] = messages
+                    state["phase"] = "onboard"
+                    return state
+            else:
+                travel_request[field] = latest_input
     
     # Determine which question to ask based on what's been answered
     questions = [
@@ -58,6 +98,15 @@ def onboard_node(state: AgentState) -> AgentState:
     
     # All questions answered — validate and build TravelRequest
     try:
+        # Handle confirmation (check if last user message is "yes")
+        if messages and messages[-1].get("role") == "user":
+            user_confirmation = messages[-1].get("content", "").strip().lower()
+            if user_confirmation not in ("yes", "y", "confirm", "ok"):
+                messages.append({"role": "assistant", "content": "Please confirm with 'yes' to proceed."})
+                state["messages"] = messages
+                state["phase"] = "onboard"
+                return state
+        
         # Parse travel_style if it's a string
         travel_style = travel_request.get("travel_style", [])
         if isinstance(travel_style, str):
@@ -82,20 +131,22 @@ def onboard_node(state: AgentState) -> AgentState:
         
         state["confirmed_request"] = confirmed
         summary = (
-            f"Destination: {confirmed.destination}\n"
-            f"Departure: {confirmed.departure_date}\n"
-            f"Return: {confirmed.return_date}\n"
-            f"Budget: ${confirmed.budget:.2f}\n"
-            f"Style: {', '.join(confirmed.travel_style)}\n\n"
-            f"Ready to book? (yes/no)"
+            f"✅ **Confirmed Travel Request**\n\n"
+            f"**Destination:** {confirmed.destination}\n"
+            f"**Departure:** {confirmed.departure_date}\n"
+            f"**Return:** {confirmed.return_date}\n"
+            f"**Budget:** ${confirmed.budget:.2f}\n"
+            f"**Travel Style:** {', '.join(confirmed.travel_style)}\n\n"
+            f"Finding the perfect itinerary..."
         )
-        messages.append({"role": "assistant", "content": f"Summary:\n{summary}"})
+        messages.append({"role": "assistant", "content": summary})
+        state["phase"] = "plan"  # Auto-transition to planning
         
     except ValueError as e:
-        messages.append({"role": "assistant", "content": f"Validation error: {e}. Please try again."})
+        messages.append({"role": "assistant", "content": f"❌ Validation error: {e}. Please try again."})
     
     state["messages"] = messages
-    state["phase"] = "onboard"
+    state["travel_request"] = travel_request
     return state
 
 
@@ -151,14 +202,27 @@ def plan_node(state: AgentState) -> AgentState:
 def rank_node(state: AgentState) -> AgentState:
     """
     Normalize scores across itineraries and sort by match_score descending.
+    Handles user selection through state updates from the UI.
     """
     messages = state.get("messages", [])
     itineraries = state.get("itineraries", [])
     confirmed_request = state.get("confirmed_request")
     reasoning_log = state.get("reasoning_log", [])
     
+    # If no itineraries, stay in rank phase waiting for user input
     if not itineraries or not confirmed_request:
-        state["phase"] = "done"
+        state["phase"] = "rank"
+        return state
+    
+    # Check if itineraries have been scored already (avoid re-scoring)
+    if all(it.match_score > 0 for it in itineraries):
+        # Already scored, check if user selected an itinerary
+        if state.get("selected_itinerary"):
+            state["phase"] = "confirm"
+            return state
+        
+        # Show options and wait for selection
+        state["phase"] = "rank"
         return state
     
     # Compute raw scores and normalize
@@ -186,18 +250,19 @@ def rank_node(state: AgentState) -> AgentState:
     
     state["itineraries"] = itineraries
     state["reasoning_log"] = reasoning_log
-    state["phase"] = "confirm"
+    state["phase"] = "rank"
     
-    # Display options for user selection
-    options_text = "Here are your top options:\n"
+    # Display options for user selection (UI handles the button clicks)
+    options_text = "🎯 **Here are your top options:**\n\n"
     for i, it in enumerate(itineraries):
         activity_names = ", ".join(a.name for a in it.activities) if it.activities else "None"
+        fallback_note = " ⚠️ *Exceeds Budget*" if it.is_partial_fallback else ""
         options_text += (
-            f"\n**Option {i+1}** (Match: {it.match_score:.1%})\n"
-            f"  Flight: {it.flight.airline} → ${it.flight.price:.2f}\n"
-            f"  Hotel: {it.hotel.name} ({it.hotel.stars}★) → ${it.hotel.price_per_night:.2f}/night\n"
-            f"  Activities: {activity_names}\n"
-            f"  **Total: ${it.total_cost:.2f}**\n"
+            f"**Option {i+1}** (Match: {it.match_score:.1%}){fallback_note}\n"
+            f"> Flight: {it.flight.airline} → ${it.flight.price:.2f}\n"
+            f"> Hotel: {it.hotel.name} ({it.hotel.stars}★) → ${it.hotel.price_per_night:.2f}/night\n"
+            f"> Activities: {activity_names}\n"
+            f"> **Total: ${it.total_cost:.2f}**\n\n"
         )
     
     messages.append({"role": "assistant", "content": options_text})
