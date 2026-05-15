@@ -501,12 +501,12 @@ def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
     with st.container(border=True):
         if is_over:
             st.markdown(
-                f'<div class="itin-header-warn">⚠️ Option {index + 1} — Over budget by ${gap:,.0f} &nbsp;|&nbsp; Match: {itin.match_score:.0%}</div>',
+                f'<div class="itin-header-warn">⚠️ Option {index + 1} — Over budget by ${gap:,.0f}</div>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                f'<div class="itin-header-good">✅ Option {index + 1} — Within budget &nbsp;|&nbsp; Match: {itin.match_score:.0%}</div>',
+                f'<div class="itin-header-good">✅ Option {index + 1} — Within budget</div>',
                 unsafe_allow_html=True,
             )
 
@@ -560,7 +560,7 @@ def _render_trip_card(index: int, itin: Itinerary, confirmed) -> None:
         if st.button(
             f"Select Option {index + 1} →",
             key=f"select_{index}",
-            type="primary" if index == 0 else "secondary",
+            type="primary",
             use_container_width=True,
         ):
             state["selected_itinerary"] = itin
@@ -690,90 +690,45 @@ if not state["messages"]:
 # Show payment confirmation modal
 if st.session_state.get("show_payment_modal") and state.get("selected_itinerary"):
     itin = state["selected_itinerary"]
-    st.markdown(
-        f"""
-        <style>
-        .modal-overlay {{
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(15, 23, 42, 0.6);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 999;
-            overflow: hidden;
-        }}
-        .modal-content {{
-            background: white;
-            border-radius: 16px;
-            padding: 40px 32px 32px;
-            max-width: 480px;
-            box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
-            text-align: center;
-        }}
-        .modal-title {{
-            font-size: 1.5rem;
-            font-weight: 900;
-            color: #0f172a;
-            margin-bottom: 16px;
-        }}
-        .modal-price {{
-            font-size: 2.2rem;
-            font-weight: 900;
-            color: #0d9488;
-            margin: 16px 0;
-        }}
-        .modal-text {{
-            font-size: 1rem;
-            color: #64748b;
-            margin-bottom: 24px;
-            line-height: 1.6;
-        }}
-        </style>
-        <div class="modal-overlay">
-          <div class="modal-content">
-            <div style="font-size:3rem;margin-bottom:24px">✈️</div>
-            <div class="modal-title">Trip Selected!</div>
-            <div class="modal-price">${itin.total_cost:,.0f}</div>
-            <div class="modal-text">
-              <b>{itin.flight.airline}</b> + <b>{itin.hotel.name}</b>
-            </div>
-            <div class="modal-text" style="color: #334155; font-weight: 600;">
-              Proceed to payment to complete your booking
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-    st.markdown(
-        """
-        <style>
-        [data-testid="stButton"] {
-            position: relative;
-            z-index: 1001 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    _, center, _ = st.columns([1, 2, 1])
+    with center:
+        st.markdown(
+            f"""
+            <div style="
+                background: white;
+                border-radius: 20px;
+                padding: 48px 36px 40px;
+                box-shadow: 0 8px 40px rgba(15,23,42,0.15);
+                text-align: center;
+                margin: 40px 0 24px;
+            ">
+                <div style="font-size:3.2rem;margin-bottom:20px">✈️</div>
+                <div style="font-size:1.6rem;font-weight:900;color:#0f172a;margin-bottom:12px">Trip Selected!</div>
+                <div style="font-size:2.6rem;font-weight:900;color:#0d9488;margin:16px 0">${itin.total_cost:,.0f}</div>
+                <div style="font-size:1rem;color:#475569;margin-bottom:8px">
+                    <b>{itin.flight.airline}</b> + <b>{itin.hotel.name}</b>
+                </div>
+                <div style="font-size:0.95rem;color:#64748b;margin-top:8px">
+                    Proceed to payment to complete your booking
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("← Back to Options", use_container_width=True, key="modal_back"):
-            state["selected_itinerary"] = None
-            state["phase"] = "rank"
-            st.session_state.state = state
-            st.session_state.show_payment_modal = False
-            st.rerun()
-    with col2:
-        if st.button("💳 Go to Payment →", type="primary", use_container_width=True, key="modal_payment"):
-            st.session_state.show_payment_modal = False
-            st.rerun()
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("← Back to Options", use_container_width=True, key="modal_back"):
+                state["selected_itinerary"] = None
+                state["phase"] = "rank"
+                st.session_state.state = state
+                st.session_state.show_payment_modal = False
+                st.rerun()
+        with btn_col2:
+            if st.button("💳 Go to Payment →", type="primary", use_container_width=True, key="modal_payment"):
+                st.session_state.show_payment_modal = False
+                st.rerun()
 
 conversation_started = _has_user_message(state)
 _render_topbar(show_reset=conversation_started or state["phase"] != "onboard")
@@ -909,7 +864,6 @@ if state["phase"] == "collect" and state["selected_itinerary"]:
             unsafe_allow_html=True,
         )
 
-        st.info("🎯 Demo Mode — Enter any valid card details (no real charge)")
 
         st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px'>Card Information</div>", unsafe_allow_html=True)
 
@@ -1052,7 +1006,6 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
         with c2:
             st.markdown(f"**Activities** &nbsp; {', '.join(a.name for a in itin.activities) or 'None'}")
             st.markdown(f"**Total Cost** &nbsp; **${itin.total_cost:,.0f}**")
-            st.markdown(f"**Match Score** &nbsp; {itin.match_score:.0%}")
 
     p   = state.get("passenger_info", {})
     c   = state.get("contact_info",   {})

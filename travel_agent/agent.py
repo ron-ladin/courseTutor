@@ -219,23 +219,27 @@ def _build_confirmed_request_from_preferences(
 
     try:
         tr = _normalise_trip_dates(tr)
+        dep = date.fromisoformat(str(tr["departure_date"]).strip())
+        ret = date.fromisoformat(str(tr["return_date"]).strip())
+        if ret < dep:
+            dep, ret = ret, dep
         confirmed = TravelRequest(
             destination=str(tr["destination"]),
-            departure_date=date.fromisoformat(str(tr["departure_date"]).strip()),
-            return_date=date.fromisoformat(str(tr["return_date"]).strip()),
+            departure_date=dep,
+            return_date=ret,
             budget=_coerce_budget(tr["budget"]),
             travel_style=_normalise_travel_style(tr.get("travel_style")),
         )
         return confirmed, None
-    except Exception as exc:
-        return None, f"Validation error: {exc}"
+    except Exception:
+        return None, "Something went wrong, please try again later."
 
 
 # ── Onboarding (rule-based fallback) ──────────────────────────────────────────
 
 _FIELD_ORDER = ["destination", "departure_date", "return_date", "budget", "travel_style"]
 
-_VALID_DESTINATIONS = ["Tokyo", "Paris", "Bali", "New York"]
+_VALID_DESTINATIONS = list(STATIC_DATA.keys())
 _VALID_STYLES = ["adventure", "culture", "luxury", "romance", "nature", "food", "budget"]
 
 _MISSING_QUESTIONS = {
@@ -667,10 +671,7 @@ def onboard_node(state: AgentState) -> AgentState:
             state["phase"] = "onboard"
             messages.append({
                 "role": "assistant",
-                "content": (
-                    "I am almost ready, but I still need valid trip details before planning. "
-                    f"{error}."
-                ),
+                "content": "Something went wrong, please try again later.",
             })
     else:
         state["phase"] = "onboard"
@@ -709,11 +710,8 @@ def plan_node(state: AgentState) -> AgentState:
         )
         messages.append({"role": "assistant", "content": msg})
 
-    except ConnectionError as e:
-        messages.append({"role": "assistant", "content": str(e)})
-        state["phase"] = "onboard"
-    except Exception as e:
-        messages.append({"role": "assistant", "content": f"Planning error: {e}"})
+    except Exception:
+        messages.append({"role": "assistant", "content": "Something went wrong, please try again later."})
         state["phase"] = "onboard"
 
     state["messages"] = messages
@@ -1116,11 +1114,8 @@ def confirm_node(state: AgentState) -> AgentState:
             f"All bookings confirmed. Master reference: {flight_bid}."
         )
 
-    except ConnectionError as e:
-        messages.append({"role": "assistant", "content": str(e)})
-
-    except Exception as e:
-        messages.append({"role": "assistant", "content": f"Booking error: {e}"})
+    except Exception:
+        messages.append({"role": "assistant", "content": "Something went wrong, please try again later."})
 
     state["messages"] = messages
     state["reasoning_log"] = reasoning_log

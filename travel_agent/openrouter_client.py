@@ -147,11 +147,16 @@ def generate_autonomous_response(
     if not openrouter_enabled():
         return _fallback_autonomous_response(chat_history, safe_preferences)
 
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+
     system_prompt = (
+        f"Today's date is {today_str}. "
         "You are SkySwift AI, an autonomous travel agent. "
         "Your goal is to collect enough information to plan a trip: destination, exact departure_date, "
         "exact return_date, and total budget in USD. If the user is flexible about dates, propose concrete "
-        "YYYY-MM-DD dates and ask them to confirm. You may also capture travel_style when the user mentions it.\n\n"
+        "YYYY-MM-DD dates and ask them to confirm. All proposed dates must be strictly in the future (after today). "
+        "You may also capture travel_style when the user mentions it.\n\n"
         "Supported demo destinations are: " + supported_destinations + ". "
         "If the user asks for an unsupported destination, explain that this demo currently supports only those places.\n\n"
         "When the user chooses a supported destination and has not shared travel_style/interests yet, do not ask for budget in the same message. "
