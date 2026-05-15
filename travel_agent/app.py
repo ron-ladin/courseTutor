@@ -803,186 +803,157 @@ if state["phase"] == "rank":
             st.rerun()
 
 
-# ── Collect phase: Tabs for Order + Payment ────────────────────────────────
+# ── Collect phase: Step wizard ────────────────────────────────────────────────
 if state["phase"] == "collect" and state["selected_itinerary"]:
     itin: Itinerary = state["selected_itinerary"]
+    from datetime import date as _date
+
+    if "checkout_step" not in st.session_state:
+        st.session_state.checkout_step = 0
+
+    step = st.session_state.checkout_step
+    confirmed = state.get("confirmed_request")
+
     st.divider()
 
-    # Create tabs
-    tab_order, tab_payment, tab_confirm = st.tabs(["📋 Order Review", "💳 Payment", "✅ Confirmation"])
+    # Step indicator
+    step_labels = ["📋 Review", "💳 Payment", "🧳 Passenger"]
+    cols = st.columns(3)
+    for i, label in enumerate(step_labels):
+        with cols[i]:
+            if i == step:
+                st.markdown(f"<div style='text-align:center;font-weight:800;color:#0d9488;border-bottom:3px solid #0d9488;padding-bottom:6px'>{label}</div>", unsafe_allow_html=True)
+            elif i < step:
+                st.markdown(f"<div style='text-align:center;font-weight:600;color:#94a3b8;border-bottom:2px solid #e2e8f0;padding-bottom:6px'>✓ {label}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='text-align:center;font-weight:500;color:#cbd5e1;border-bottom:2px solid #e2e8f0;padding-bottom:6px'>{label}</div>", unsafe_allow_html=True)
 
-    # TAB 1: Order Review
-    with tab_order:
-        st.markdown(
-            "<h3 style='font-size:1.3rem;font-weight:800;margin-bottom:20px'>Your Trip</h3>",
-            unsafe_allow_html=True,
-        )
+    st.write("")
+
+    # ── STEP 0: Order Review ──────────────────────────────────────────────────
+    if step == 0:
+        st.markdown("<h3 style='font-size:1.3rem;font-weight:800;margin-bottom:16px'>Your Trip Summary</h3>", unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("<div style='font-size:0.85rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em'>📍 Destination</div>", unsafe_allow_html=True)
-            st.markdown(f"<div style='font-size:1.2rem;font-weight:800;color:#0f172a;margin:8px 0'>{itin.flight.destination}</div>", unsafe_allow_html=True)
-            from datetime import date as _date
-            confirmed = state.get("confirmed_request")
+            st.markdown(f"<div style='font-size:1.2rem;font-weight:800;color:#0f172a'>📍 {itin.flight.destination}</div>", unsafe_allow_html=True)
             if confirmed:
-                nights = (_date.fromisoformat(str(confirmed.return_date)) - _date.fromisoformat(str(confirmed.departure_date))).days
+                nights = (confirmed.return_date - confirmed.departure_date).days
                 st.write(f"{confirmed.departure_date} → {confirmed.return_date} ({nights} nights)")
 
         c1, c2, c3 = st.columns(3)
         with c1:
             with st.container(border=True):
                 st.markdown("<div style='font-size:0.75rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em'>✈️ Flight</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size:1.1rem;font-weight:800'>{escape(itin.flight.airline)}</div>", unsafe_allow_html=True)
-                st.write(f"${itin.flight.price:,.0f}")
-                st.write(f"{itin.flight.duration_hours}h flight")
+                st.markdown(f"<div style='font-size:1rem;font-weight:800'>{escape(itin.flight.airline)}</div>", unsafe_allow_html=True)
+                st.write(f"${itin.flight.price:,.0f} · {itin.flight.duration_hours}h")
         with c2:
             with st.container(border=True):
                 st.markdown("<div style='font-size:0.75rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em'>🏨 Hotel</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size:1.1rem;font-weight:800'>{escape(itin.hotel.name)}</div>", unsafe_allow_html=True)
-                st.write(f"${itin.hotel.price_per_night:,.0f}/night")
-                st.write(f"{'⭐' * itin.hotel.stars}")
+                st.markdown(f"<div style='font-size:1rem;font-weight:800'>{escape(itin.hotel.name)}</div>", unsafe_allow_html=True)
+                st.write(f"${itin.hotel.price_per_night:,.0f}/night · {'⭐' * itin.hotel.stars}")
         with c3:
             with st.container(border=True):
                 st.markdown("<div style='font-size:0.75rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em'>💰 Total</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='font-size:1.4rem;font-weight:900;color:#0d9488'>${itin.total_cost:,.0f}</div>", unsafe_allow_html=True)
-                st.write("Total package price")
 
         st.write("")
-        st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:10px'>🎯 Included Activities</div>", unsafe_allow_html=True)
-        activities = ", ".join(a.name for a in itin.activities) or "None"
-        st.write(activities)
+        st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:6px'>🎯 Activities</div>", unsafe_allow_html=True)
+        st.write(", ".join(a.name for a in itin.activities) or "None")
 
         st.write("")
-        if st.button("← Go Back to Options", type="secondary", use_container_width=True):
-            state["phase"] = "rank"
-            st.session_state.state = state
-            st.rerun()
+        col_next, col_back = st.columns([2, 1])
+        with col_next:
+            if st.button("Next: Payment →", type="primary", use_container_width=True):
+                st.session_state.checkout_step = 1
+                st.rerun()
+        with col_back:
+            if st.button("← Back to Options", use_container_width=True):
+                state["phase"] = "rank"
+                st.session_state.checkout_step = 0
+                st.session_state.state = state
+                st.rerun()
 
-    # TAB 2: Payment
-    with tab_payment:
-        st.markdown(
-            "<h3 style='font-size:1.3rem;font-weight:800;margin-bottom:20px'>Payment Details</h3>",
-            unsafe_allow_html=True,
-        )
-
-
-        st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px'>Card Information</div>", unsafe_allow_html=True)
+    # ── STEP 1: Payment ───────────────────────────────────────────────────────
+    elif step == 1:
+        st.markdown("<h3 style='font-size:1.3rem;font-weight:800;margin-bottom:16px'>Payment Details</h3>", unsafe_allow_html=True)
 
         pay = state.get("payment_info", {})
-        card_num = st.text_input(
-            "Card Number *",
-            value=pay.get("card_number", ""),
-            placeholder="4532 1234 5678 9010",
-            key="payment_card",
-        )
+        card_num = st.text_input("Card Number *", value=pay.get("card_number", ""), placeholder="4532 1234 5678 9010", key="payment_card")
 
         c1, c2 = st.columns(2)
         with c1:
-            card_exp = st.text_input(
-                "Expiry (MM/YY) *",
-                value=pay.get("card_expiry", ""),
-                placeholder="12/26",
-                key="payment_expiry",
-            )
+            card_exp = st.text_input("Expiry (MM/YY) *", value=pay.get("card_expiry", ""), placeholder="12/26", key="payment_expiry")
         with c2:
-            card_cvc = st.text_input(
-                "CVC *",
-                value=pay.get("card_cvc", ""),
-                placeholder="123",
-                key="payment_cvc",
-                type="password",
-            )
+            card_cvc = st.text_input("CVC *", value=pay.get("card_cvc", ""), placeholder="123", key="payment_cvc", type="password")
 
-        card_name = st.text_input(
-            "Cardholder Name *",
-            value=pay.get("cardholder_name", ""),
-            placeholder="JOHN DOE",
-            key="payment_name",
-        )
+        card_name = st.text_input("Cardholder Name *", value=pay.get("cardholder_name", ""), placeholder="JOHN DOE", key="payment_name")
 
         st.write("")
-        st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px'>Billing Address</div>", unsafe_allow_html=True)
-
         c = state.get("contact_info", {})
-        email = st.text_input(
-            "Email *",
-            value=c.get("email", ""),
-            placeholder="you@example.com",
-            key="billing_email",
-        )
-        phone = st.text_input(
-            "Phone *",
-            value=c.get("phone", ""),
-            placeholder="+1 (555) 123-4567",
-            key="billing_phone",
-        )
+        email = st.text_input("Email *", value=c.get("email", ""), placeholder="you@example.com", key="billing_email")
+        phone = st.text_input("Phone *", value=c.get("phone", ""), placeholder="+1 555 123 4567", key="billing_phone")
 
-        # Update payment state
-        last4 = card_num.replace(" ", "")[-4:] if card_num else "0000"
-        state["payment_info"] = {
-            "card_number": card_num,
-            "card_expiry": card_exp,
-            "cardholder_name": card_name,
-            "card_cvc": card_cvc,
-            "card_last4": last4,
-        }
-        state["contact_info"] = {"email": email, "phone": phone}
+        last4 = card_num.replace(" ", "")[-4:] if len(card_num.replace(" ", "")) >= 4 else "0000"
+        state["payment_info"] = {"card_number": card_num, "card_expiry": card_exp, "cardholder_name": card_name, "card_cvc": card_cvc, "card_last4": last4}
+        state["contact_info"] = {"email": email, "phone": phone, "address": ""}
+        st.session_state.state = state
 
-    # TAB 3: Confirmation
-    with tab_confirm:
-        st.markdown(
-            "<h3 style='font-size:1.3rem;font-weight:800;margin-bottom:20px'>Passenger Information</h3>",
-            unsafe_allow_html=True,
-        )
+        st.write("")
+        col_next, col_back = st.columns([2, 1])
+        with col_next:
+            if st.button("Next: Passenger →", type="primary", use_container_width=True):
+                if card_num and card_exp and card_name and email:
+                    st.session_state.checkout_step = 2
+                    st.rerun()
+                else:
+                    st.error("Please fill all required fields.")
+        with col_back:
+            if st.button("← Back", use_container_width=True):
+                st.session_state.checkout_step = 0
+                st.rerun()
 
-        st.markdown("<div style='font-size:0.9rem;font-weight:700;margin-bottom:14px'>Passenger Details</div>", unsafe_allow_html=True)
+    # ── STEP 2: Passenger + Book ──────────────────────────────────────────────
+    elif step == 2:
+        st.markdown("<h3 style='font-size:1.3rem;font-weight:800;margin-bottom:16px'>Passenger Details</h3>", unsafe_allow_html=True)
 
         p = state.get("passenger_info", {})
         c1, c2 = st.columns(2)
         with c1:
-            full_name = st.text_input(
-                "Full Name *",
-                value=p.get("full_name", ""),
-                placeholder="John Doe",
-                key="passenger_name",
-            )
+            full_name = st.text_input("Full Name *", value=p.get("full_name", ""), placeholder="John Doe", key="passenger_name")
         with c2:
-            passport = st.text_input(
-                "Passport Number *",
-                value=p.get("passport_number", ""),
-                placeholder="AB123456789",
-                key="passenger_passport",
-            )
+            passport = st.text_input("Passport Number *", value=p.get("passport_number", ""), placeholder="AB123456789", key="passenger_passport")
 
-        # Update state
-        state["passenger_info"] = {"full_name": full_name, "passport_number": passport}
+        dob = st.text_input("Date of Birth * (YYYY-MM-DD)", value=p.get("date_of_birth", ""), placeholder="1990-01-15", key="passenger_dob")
+
+        state["passenger_info"] = {"full_name": full_name, "passport_number": passport, "date_of_birth": dob}
+        st.session_state.state = state
 
         st.write("")
-        st.markdown("<div style='font-size:1rem;font-weight:800;margin-bottom:16px;margin-top:16px'>📋 Review & Book</div>", unsafe_allow_html=True)
-
-        # Summary
         with st.container(border=True):
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("🎫 Passenger", full_name or "—")
             with c2:
-                st.metric("💳 Payment Method", "Card" if state["payment_info"].get("card_last4") else "—")
+                st.metric("💳 Card", f"**** {state['payment_info'].get('card_last4', '—')}")
             with c3:
-                st.metric("💰 Total Cost", f"${itin.total_cost:,.0f}")
+                st.metric("💰 Total", f"${itin.total_cost:,.0f}")
 
         st.write("")
         col_book, col_back = st.columns([2, 1])
         with col_book:
             if st.button("✅ Complete Booking", type="primary", use_container_width=True):
-                if full_name and passport and state["payment_info"].get("card_number") and state["contact_info"].get("email"):
+                if full_name and passport and dob and state["payment_info"].get("card_number") and state["contact_info"].get("email"):
                     state["phase"] = "confirm"
-                    st.session_state.state = state
+                    with st.spinner("Confirming your booking..."):
+                        new_state = graph.invoke(state)
+                    st.session_state.state = new_state
+                    st.session_state.checkout_step = 0
                     st.rerun()
                 else:
-                    st.error("❌ Please fill all required fields (* marked)")
+                    st.error("Please fill all required fields.")
         with col_back:
             if st.button("← Back", use_container_width=True):
-                state["phase"] = "rank"
-                st.session_state.state = state
+                st.session_state.checkout_step = 1
                 st.rerun()
 
 
@@ -1031,27 +1002,59 @@ if state["phase"] == "confirm" and state["selected_itinerary"]:
 # ── Done ──────────────────────────────────────────────────────────────────────
 if state["phase"] == "done" and state["booking"]:
     st.divider()
-    itin = state.get("selected_itinerary")
-    dest = itin.flight.destination if itin else "your destination"
-    airline = itin.flight.airline if itin else ""
-    hotel = itin.hotel.name if itin else ""
-    total = f"${itin.total_cost:,.0f}" if itin else ""
+    itin     = state.get("selected_itinerary")
+    confirmed = state.get("confirmed_request")
+    dest     = itin.flight.destination if itin else "your destination"
+    airline  = itin.flight.airline if itin else ""
+    hotel    = itin.hotel.name if itin else ""
+    total    = f"${itin.total_cost:,.0f}" if itin else ""
+    activities_text = " · ".join(a.name for a in itin.activities) if itin and itin.activities else "None"
+
+    # Build Google Calendar URL
+    cal_url = ""
+    if itin and confirmed:
+        dep = confirmed.departure_date.strftime("%Y%m%d")
+        # Calendar end date is exclusive for all-day events — add 1 day
+        from datetime import timedelta
+        ret = (confirmed.return_date + timedelta(days=1)).strftime("%Y%m%d")
+        details = (
+            f"Flight: {airline}%0A"
+            f"Hotel: {hotel}%0A"
+            f"Activities: {activities_text}%0A"
+            f"Total: {total}"
+        )
+        cal_url = (
+            f"https://calendar.google.com/calendar/render?action=TEMPLATE"
+            f"&text=Trip+to+{dest.replace(' ', '+')}"
+            f"&dates={dep}/{ret}"
+            f"&details={details}"
+            f"&location={dest.replace(' ', '+')}"
+        )
 
     st.markdown(
         f"""
         <div class="booking-card">
           <div class="booking-icon">🎉</div>
           <div class="booking-title">You're going to {dest}!</div>
-          <div class="booking-id">Booking ID: {state['booking'].booking_id}</div>
-          <div class="booking-detail">{airline} &nbsp;·&nbsp; {hotel} &nbsp;·&nbsp; {total}</div>
+          <div style="margin:16px 0 6px;font-size:0.95rem;color:#334155;font-weight:600">
+            {airline} &nbsp;·&nbsp; {hotel}
+          </div>
+          <div style="font-size:0.88rem;color:#64748b;margin-bottom:8px">{activities_text}</div>
+          <div style="font-size:1.4rem;font-weight:900;color:#0d9488;margin-top:12px">{total}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
     st.write("")
-    if st.button("✈️ Plan Another Trip", type="primary", use_container_width=False):
-        st.session_state.state = _empty_state()
-        st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✈️ Plan Another Trip", type="primary", use_container_width=True):
+            st.session_state.state = _empty_state()
+            st.rerun()
+    with col2:
+        if cal_url:
+            st.link_button("📅 Add to Google Calendar", cal_url, use_container_width=True)
 
 
 # ── Chat input (onboard + collect phases only) ────────────────────────────────

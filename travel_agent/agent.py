@@ -1093,19 +1093,12 @@ def confirm_node(state: AgentState) -> AgentState:
         state["booking"] = booking
         state["phase"] = "done"
 
-        activity_lines = "\n".join(
-            f"  - Activity: {bid}" for bid in activity_bids
-        )
-
         messages.append({
             "role": "assistant",
             "content": (
-                "Your trip is confirmed!\n\n"
-                f"  - Flight: {flight_bid}\n"
-                f"  - Hotel:  {hotel_bid}\n"
-                f"{activity_lines}\n\n"
-                f"Total charged: ${selected.total_cost:.2f} "
-                f"to card ending in {payment_info.get('card_last4', '????')}. "
+                f"Your trip to {selected.flight.destination} is confirmed! 🎉\n\n"
+                f"✈️ {selected.flight.airline}  ·  🏨 {selected.hotel.name}\n"
+                f"💰 Total: ${selected.total_cost:,.0f} charged to card ending in {payment_info.get('card_last4', '????')}.\n\n"
                 f"Safe travels, {passenger_info.get('full_name', 'traveller')}!"
             ),
         })
