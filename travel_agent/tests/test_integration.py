@@ -56,12 +56,12 @@ def test_onboarding_flow_complete():
     assert "departure" in state["messages"][-1]["content"].lower() or "depart" in state["messages"][-1]["content"].lower()
     
     # Step 3: Answer departure date
-    state["messages"].append({"role": "user", "content": "2025-06-01"})
+    state["messages"].append({"role": "user", "content": "2027-06-01"})
     state = onboard_node(state)
     assert "return" in state["messages"][-1]["content"].lower()
     
     # Step 4: Answer return date
-    state["messages"].append({"role": "user", "content": "2025-06-08"})
+    state["messages"].append({"role": "user", "content": "2027-06-08"})
     state = onboard_node(state)
     assert "budget" in state["messages"][-1]["content"].lower()
     
@@ -95,8 +95,8 @@ def test_planning_with_mock_data():
         "travel_request": {},
         "confirmed_request": TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 8),
+            departure_date=date(2027, 6, 1),
+            return_date=date(2027, 6, 8),
             budget=5000,
             travel_style=["luxury", "adventure"],
         ),
@@ -231,8 +231,8 @@ def test_ranking_and_scoring():
         "travel_request": {},
         "confirmed_request": TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 8),
+            departure_date=date(2027, 6, 1),
+            return_date=date(2027, 6, 8),
             budget=5000,
             travel_style=["luxury", "adventure"],
         ),
@@ -292,8 +292,8 @@ def test_booking_confirmation():
         "travel_request": {},
         "confirmed_request": TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 8),
+            departure_date=date(2027, 6, 1),
+            return_date=date(2027, 6, 8),
             budget=5000,
             travel_style=["luxury"],
         ),
@@ -354,7 +354,7 @@ def test_error_handling_invalid_dates():
         "messages": [],
         "travel_request": {
             "destination": "Tokyo",
-            "departure_date": "2025-06-01",
+            "departure_date": "2027-06-01",
         },
         "confirmed_request": None,
         "itineraries": [],
@@ -366,7 +366,7 @@ def test_error_handling_invalid_dates():
     }
     
     # Try to set invalid return date
-    state["messages"].append({"role": "user", "content": "2025-05-01"})  # Before departure
+    state["messages"].append({"role": "user", "content": "2027-05-01"})  # Before departure
     state = onboard_node(state)
     
     # Should stay in onboard and ask for valid input
@@ -427,3 +427,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ UNEXPECTED ERROR: {e}\n")
         raise
+

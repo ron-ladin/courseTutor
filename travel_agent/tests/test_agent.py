@@ -46,7 +46,7 @@ def test_trip_date_normalisation_uses_departure_year_for_return():
 
 @given(
     destination=st.text(min_size=1, max_size=50),
-    departure=st.dates(min_value=date(2025, 1, 1), max_value=date(2026, 12, 31)),
+    departure=st.dates(min_value=date(2027, 1, 1), max_value=date(2028, 12, 31)),
     budget=st.floats(min_value=100, max_value=10000),
     style_tags=st.lists(st.text(min_size=1, max_size=20), min_size=1, max_size=5),
 )
@@ -142,8 +142,8 @@ def test_itinerary_ranking_order(num_itineraries):
         "travel_request": {"travel_style": ["luxury", "adventure"]},
         "confirmed_request": TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 8),
+            departure_date=date(2027, 6, 1),
+            return_date=date(2027, 6, 8),
             budget=5000,
             travel_style=["luxury", "adventure"],
         ),
@@ -202,8 +202,8 @@ def test_booking_id_is_valid_uuid(num_activities):
         "travel_request": {},
         "confirmed_request": TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 8),
+            departure_date=date(2027, 6, 1),
+            return_date=date(2027, 6, 8),
             budget=5000,
             travel_style=["luxury"],
         ),
@@ -257,8 +257,8 @@ def test_confirmation_state_is_terminal():
         "travel_request": {},
         "confirmed_request": TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 8),
+            departure_date=date(2027, 6, 1),
+            return_date=date(2027, 6, 8),
             budget=5000,
             travel_style=["luxury"],
         ),
@@ -304,3 +304,4 @@ if __name__ == "__main__":
     # Run a quick sanity check
     test_graph_builds_and_compiles()
     print("✅ All agent tests passed!")
+

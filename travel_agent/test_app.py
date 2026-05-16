@@ -142,8 +142,8 @@ def test_reasoning_log_grows_after_planning():
 
     request = TravelRequest(
         destination="Tokyo",
-        departure_date=date(2025, 3, 10),
-        return_date=date(2025, 3, 17),
+        departure_date=date(2027, 3, 10),
+        return_date=date(2027, 3, 17),
         budget=1500.0,
         travel_style=["adventure", "culture"],
     )
@@ -163,8 +163,8 @@ def test_tokyo_happy_path_produces_itineraries():
     budget = 1500.0
     request = TravelRequest(
         destination="Tokyo",
-        departure_date=date(2025, 3, 10),
-        return_date=date(2025, 3, 17),
+        departure_date=date(2027, 3, 10),
+        return_date=date(2027, 3, 17),
         budget=budget,
         travel_style=["adventure", "culture"],
     )
@@ -185,8 +185,8 @@ def test_paris_low_budget_triggers_partial_fallback():
 
     request = TravelRequest(
         destination="Paris",
-        departure_date=date(2025, 4, 1),
-        return_date=date(2025, 4, 8),
+        departure_date=date(2027, 4, 1),
+        return_date=date(2027, 4, 8),
         budget=1000.0,  # all Paris hotels > $1,500/night — always over budget
         travel_style=["romance", "culture"],
     )
@@ -205,8 +205,8 @@ def test_itineraries_sorted_by_match_score_descending():
 
     request = TravelRequest(
         destination="Tokyo",
-        departure_date=date(2025, 3, 10),
-        return_date=date(2025, 3, 17),
+        departure_date=date(2027, 3, 10),
+        return_date=date(2027, 3, 17),
         budget=2000.0,
         travel_style=["luxury", "culture"],
     )
@@ -308,8 +308,8 @@ def test_budget_validation_rejects_non_positive(budget: float):
     with pytest.raises(ValidationError):
         TravelRequest(
             destination="Tokyo",
-            departure_date=date(2025, 3, 10),
-            return_date=date(2025, 3, 17),
+            departure_date=date(2027, 3, 10),
+            return_date=date(2027, 3, 17),
             budget=budget,
             travel_style=[],
         )
@@ -318,7 +318,7 @@ def test_budget_validation_rejects_non_positive(budget: float):
 # ── Property 3: Date validation rejects invalid ranges ───────────────────────
 
 @given(
-    dep=st.dates(min_value=date(2025, 1, 1), max_value=date(2026, 12, 30)),
+    dep=st.dates(min_value=date(2027, 1, 1), max_value=date(2028, 12, 30)),
     delta=st.integers(min_value=0, max_value=365),
 )
 def test_date_validation_rejects_return_not_after_departure(dep, delta):
@@ -358,3 +358,4 @@ def test_mock_data_completeness():
         for a in activities:
             assert a.price >= 0, f"{dest} activity {a.id}: price must be >= 0"
             assert len(a.style_tags) > 0, f"{dest} activity {a.id}: style_tags must be non-empty"
+

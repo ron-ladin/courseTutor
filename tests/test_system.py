@@ -577,7 +577,7 @@ class TestFullBookingFlow:
             budget=1500.0,
             travel_style=["romance"],
         )
-        from data_client import DataClient
+        from travel_agent.data.client import LiveDataClient as DataClient
 
         # We can't call DataClient directly without a running server, so use TestClient
         # instead by hitting the server endpoints manually through a test-only DataClient wrapper.

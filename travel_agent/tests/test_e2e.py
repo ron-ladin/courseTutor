@@ -83,7 +83,7 @@ def test_11_1_full_graph_onboard_to_rank():
 
         # Answer each onboarding question. Interests come before budget so the
         # agent can suggest destination ideas before talking money.
-        for answer in ["Tokyo", "adventure, culture", "2025-06-01", "2025-06-08", "2000"]:
+        for answer in ["Tokyo", "adventure, culture", "2027-06-01", "2027-06-08", "2000"]:
             state["messages"].append({"role": "user", "content": answer})
             state = graph.invoke(state)
 
@@ -155,8 +155,8 @@ def test_11_1_no_restart_after_done():
         # Pre-fill all travel_request fields so onboard auto-confirms
         state["travel_request"] = {
             "destination": "Tokyo",
-            "departure_date": "2025-06-01",
-            "return_date": "2025-06-08",
+            "departure_date": "2027-06-01",
+            "return_date": "2027-06-08",
             "budget": 2000.0,
             "travel_style": "adventure",
         }
@@ -174,8 +174,8 @@ def test_11_2_paris_low_budget_triggers_backtrack():
     """Task 11.2: Paris with budget below hotel prices triggers backtrack + partial fallback."""
     request = TravelRequest(
         destination="Paris",
-        departure_date=date(2025, 4, 1),
-        return_date=date(2025, 4, 8),
+        departure_date=date(2027, 4, 1),
+        return_date=date(2027, 4, 8),
         budget=1500.0,  # all Paris hotels > $1,500/night
         travel_style=["romance", "culture"],
     )
@@ -195,8 +195,8 @@ def test_11_2_paris_reasoning_log_contains_hotel_search():
     """Task 11.2: Reasoning log shows GET /hotels/search?destination=Paris&max_price=<amount>."""
     request = TravelRequest(
         destination="Paris",
-        departure_date=date(2025, 4, 1),
-        return_date=date(2025, 4, 8),
+        departure_date=date(2027, 4, 1),
+        return_date=date(2027, 4, 8),
         budget=1500.0,
         travel_style=["romance"],
     )
@@ -214,7 +214,7 @@ def test_11_2_paris_reasoning_log_contains_hotel_search():
     # max_price is now per-night: (budget - flight) / nights
     from data.static import STATIC_DATA as _DATA
     cheapest_flight = min(_DATA["Paris"]["flights"], key=lambda f: f.price)
-    nights = (date(2025, 4, 8) - date(2025, 4, 1)).days
+    nights = (date(2027, 4, 8) - date(2027, 4, 1)).days
     expected_max_per_night = (1500.0 - cheapest_flight.price) / nights
     assert any(
         f"max_price={expected_max_per_night:.0f}" in e for e in hotel_search_entries
@@ -227,8 +227,8 @@ def test_11_2_paris_reasoning_log_shows_fallback_assembly():
     """Task 11.2: Reasoning log includes partial-fallback assembly message."""
     request = TravelRequest(
         destination="Paris",
-        departure_date=date(2025, 4, 1),
-        return_date=date(2025, 4, 8),
+        departure_date=date(2027, 4, 1),
+        return_date=date(2027, 4, 8),
         budget=1500.0,
         travel_style=["romance"],
     )
@@ -252,8 +252,8 @@ def test_11_2_paris_itinerary_exceeds_budget():
     budget = 1500.0
     request = TravelRequest(
         destination="Paris",
-        departure_date=date(2025, 4, 1),
-        return_date=date(2025, 4, 8),
+        departure_date=date(2027, 4, 1),
+        return_date=date(2027, 4, 8),
         budget=budget,
         travel_style=["romance"],
     )
@@ -264,3 +264,4 @@ def test_11_2_paris_itinerary_exceeds_budget():
     assert fallback.total_cost > budget, (
         f"Fallback total ${fallback.total_cost:.2f} should exceed budget ${budget:.2f}"
     )
+
